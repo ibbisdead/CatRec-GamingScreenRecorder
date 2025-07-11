@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/overlay_background">
+
+    <LinearLayout
+        android:id="@+id/recording_indicator_container"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="#CC222222"
+        android:padding="8dp"
+        android:layout_marginTop="4dp">
+
+        <View
+            android:id="@+id/recording_dot"
+            android:layout_width="12dp"
+            android:layout_height="12dp"
+            android:background="@drawable/recording_dot_bg"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/elapsed_time"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="00:00:00"
+            android:textColor="#FF4444"
+            android:textSize="16sp"
+            android:fontFamily="sans-serif-medium" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/overlay_bubble"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:src="@drawable/ic_recording"
+        android:background="@drawable/overlay_background"
+        android:padding="8dp"
+        android:clickable="true"
+        android:focusable="true" />
+
+    <ImageView
+        android:id="@+id/btn_pause_overlay"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:src="@drawable/ic_pause"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:padding="4dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:layout_gravity="end"
+        android:layout_marginTop="4dp" />
+
+    <ImageView
+        android:id="@+id/btn_mic_overlay"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:src="@drawable/ic_mic"
+        android:background="?android:attr/selectableItemBackgroundBorderless"
+        android:padding="4dp"
+        android:clickable="true"
+        android:focusable="true"
+        android:layout_gravity="end"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/paused_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Paused"
+        android:textColor="#FF4444"
+        android:textSize="18sp"
+        android:fontFamily="sans-serif-medium"
+        android:background="#AA222222"
+        android:padding="8dp"
+        android:layout_gravity="center"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/mic_muted_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Mic Muted"
+        android:textColor="#FF4444"
+        android:textSize="16sp"
+        android:fontFamily="sans-serif-medium"
+        android:background="#AA222222"
+        android:padding="6dp"
+        android:layout_gravity="center"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/overlay_controls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone"
+        android:background="@drawable/overlay_background"
+        android:padding="8dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <ImageView
+                android:id="@+id/btn_pause"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_pause"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:padding="4dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <ImageView
+                android:id="@+id/btn_mic"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_mic"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:padding="4dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+            <ImageView
+                android:id="@+id/btn_stop"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:src="@drawable/ic_stop"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:padding="4dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/mic_controls"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone"
+            android:layout_marginTop="8dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Mic Volume"
+                android:textSize="12sp"
+                android:textColor="#FFFFFF"
+                android:layout_marginBottom="4dp" />
+
+            <SeekBar
+                android:id="@+id/mic_volume_slider"
+                android:layout_width="120dp"
+                android:layout_height="wrap_content"
+                android:max="100"
+                android:progress="100"
+                android:progressTint="#FF0000"
+                android:thumbTint="#FF0000" />
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="8dp"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Noise Suppression"
+                    android:textSize="12sp"
+                    android:textColor="#FFFFFF"
+                    android:layout_marginEnd="8dp" />
+
+                <Switch
+                    android:id="@+id/noise_suppression_switch"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:checked="false" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+</LinearLayout> 

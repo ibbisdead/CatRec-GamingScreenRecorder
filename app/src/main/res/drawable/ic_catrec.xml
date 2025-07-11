@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Cat's eye shape -->
+    <path
+        android:fillColor="#FFCC80"
+        android:pathData="M4,24 Q24,4 44,24 Q24,44 4,24 Z"/>
+    <!-- Eye white -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M10,24 Q24,12 38,24 Q24,36 10,24 Z"/>
+    <!-- Camera pupil (lens) -->
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M24,18 a6,6 0 1,0 0.01,0 Z"/>
+    <!-- Camera highlight -->
+    <path
+        android:fillColor="#BBDEFB"
+        android:pathData="M27,21 a2,2 0 1,0 0.01,0 Z"/>
+    <!-- Cat slit -->
+    <path
+        android:fillColor="#212121"
+        android:pathData="M24,20 L25,28"/>
+</vector> 
