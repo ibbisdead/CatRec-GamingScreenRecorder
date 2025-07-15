@@ -102,12 +102,12 @@ class MainActivity : ComponentActivity() {
         } else {
             val shouldShowRationale = ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)
             if (!shouldShowRationale) {
-                // Denied permanently
+                // Denied permanently - show enhanced snackbar with settings action
                 showMicDeniedSnackbar(permanentlyDenied = true)
                 recordMic = false
                 requestCapturePermission(false, recordInternal)
             } else {
-                // Denied temporarily
+                // Denied temporarily - show snackbar with try again option
                 showMicDeniedSnackbar(permanentlyDenied = false)
                 recordMic = false
                 requestCapturePermission(false, recordInternal)
@@ -293,6 +293,11 @@ class MainActivity : ComponentActivity() {
         if (permissionsRequested) return
         permissionsRequested = true
         
+        // Only request overlay permission on first launch
+        if (!checkOverlayPermission()) {
+            requestOverlayPermission()
+        }
+        
         // Request notification permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -300,16 +305,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         
-        // Request microphone permission if not granted
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO)) {
-                // Show rationale dialog
-                Log.d("MainActivity", "Should show microphone permission rationale")
-            } else {
-                // Request permission directly
-                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            }
-        }
+        // DO NOT request microphone permission here - it will be requested when needed
     }
 
     @Composable
@@ -425,6 +421,8 @@ class MainActivity : ComponentActivity() {
     ) {
         var shouldRecordMic = recordMic
         this.recordInternal = recordInternal
+        
+        // Request microphone permission only when user tries to record with mic
         if (shouldRecordMic) {
             if (!isMicrophoneAvailable()) {
                 shouldRecordMic = false
@@ -437,11 +435,13 @@ class MainActivity : ComponentActivity() {
                 return
             }
         }
+        
         this.recordMic = shouldRecordMic
+        this.orientation = orientation
+        
+        // Request media projection permission only when starting recording
         val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
-        // Store orientation for use in startRecordingService
-        this.orientation = orientation
     }
 
     private fun hasMicrophonePermission(): Boolean {
@@ -530,8 +530,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showMicDeniedSnackbar(permanentlyDenied: Boolean) {
-        val message = "Microphone permission denied. Only internal audio will be recorded."
+        val message = if (permanentlyDenied) {
+            "Microphone access denied. Recording will continue with internal audio only. You can enable microphone access in Settings."
+        } else {
+            "Microphone permission denied. Recording will continue with internal audio only."
+        }
         val actionLabel = if (permanentlyDenied) "Go to Settings" else "Try Again"
+        
         CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
             snackbarHostState.currentSnackbarData?.dismiss()
             snackbarHostState.showSnackbar(

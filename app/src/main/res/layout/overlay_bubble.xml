@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/overlay_background">
+
+    <!-- Minimized Bubble View -->
+    <RelativeLayout
+        android:id="@+id/bubble_container"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:background="@drawable/bubble_background"
+        android:clickable="true"
+        android:focusable="true">
+
+        <!-- App Logo -->
+        <ImageView
+            android:id="@+id/app_logo"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_centerInParent="true"
+            android:src="@drawable/ic_launcher_foreground"
+            android:scaleType="fitCenter" />
+
+        <!-- Recording Indicator Dot -->
+        <View
+            android:id="@+id/recording_indicator_dot"
+            android:layout_width="12dp"
+            android:layout_height="12dp"
+            android:layout_alignParentEnd="true"
+            android:layout_alignParentTop="true"
+            android:layout_marginEnd="4dp"
+            android:layout_marginTop="4dp"
+            android:background="@drawable/recording_dot_bg"
+            android:visibility="visible" />
+
+    </RelativeLayout>
+
+    <!-- Expanded Controls (Hidden by default) -->
+    <LinearLayout
+        android:id="@+id/expanded_controls"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/overlay_background"
+        android:padding="12dp"
+        android:visibility="gone">
+
+        <!-- Elapsed Time Display -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <View
+                android:id="@+id/recording_dot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/recording_dot_bg"
+                android:layout_marginEnd="8dp" />
+
+            <TextView
+                android:id="@+id/elapsed_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="00:00:00"
+                android:textColor="#FF4444"
+                android:textSize="14sp"
+                android:fontFamily="sans-serif-medium" />
+        </LinearLayout>
+
+        <!-- Control Buttons -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center">
+
+            <!-- Pause/Resume Button -->
+            <ImageView
+                android:id="@+id/btn_pause"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_pause"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:padding="8dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_marginEnd="8dp" />
+
+            <!-- Mic Toggle Button -->
+            <ImageView
+                android:id="@+id/btn_mic"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_mic"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:padding="8dp"
+                android:clickable="true"
+                android:focusable="true"
+                android:layout_marginEnd="8dp" />
+
+            <!-- Stop Button -->
+            <ImageView
+                android:id="@+id/btn_stop"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:src="@drawable/ic_stop"
+                android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:padding="8dp"
+                android:clickable="true"
+                android:focusable="true" />
+
+        </LinearLayout>
+
+        <!-- Status Labels -->
+        <TextView
+            android:id="@+id/paused_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Paused"
+            android:textColor="#FF4444"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif-medium"
+            android:background="#AA222222"
+            android:padding="4dp"
+            android:layout_gravity="center"
+            android:layout_marginTop="4dp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/mic_muted_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Mic Muted"
+            android:textColor="#FF4444"
+            android:textSize="12sp"
+            android:fontFamily="sans-serif-medium"
+            android:background="#AA222222"
+            android:padding="4dp"
+            android:layout_gravity="center"
+            android:layout_marginTop="4dp"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</LinearLayout>
