@@ -44,10 +44,13 @@ import kotlin.math.abs
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.ibbie.catrec_gamingscreenrecorder.AnalyticsManager
 import android.media.MediaScannerConnection
+import com.ibbie.catrec_gamingscreenrecorder.audio.CombinedAudioRecorder
 
 class ScreenRecorderService : Service() {
 
     companion object {
+        private var recordMic: Boolean = false
+        private var recordInternal: Boolean = false
         private const val TAG = "ScreenRecorderService"
         private const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "screen_recorder_channel"
@@ -78,7 +81,7 @@ class ScreenRecorderService : Service() {
     private var recordingFileName: String? = null
 
     private var micRecorder: MicRecorder? = null
-    private var combinedAudioRecorder: com.ibbie.catrec_gamingscreenrecorder.audio.CombinedAudioRecorder? = null
+    private var combinedAudioRecorder: CombinedAudioRecorder? = null
     private lateinit var audioOutputFile: File
 
     private var isMicMuted = false
@@ -136,7 +139,7 @@ class ScreenRecorderService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d("RecordingDebug", "ScreenRecorderService onStartCommand called with action: ${intent?.action}")
-        
+
         // Start foreground service immediately with proper type for MediaProjection
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
@@ -150,7 +153,7 @@ class ScreenRecorderService : Service() {
                 createNotification()
             )
         }
-        
+
         when (intent?.action) {
             "START_RECORDING" -> {
                 val resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED)
@@ -165,7 +168,7 @@ class ScreenRecorderService : Service() {
                 val density = intent.getIntExtra("density", 1)
                 val bitrateValue = intent.getIntExtra("bitrate", 8000000)
                 val orientation = intent.getStringExtra("orientation") ?: "Auto"
-                
+
                 Log.d("RecordingDebug", "Starting recording with resultCode: $resultCode, data: ${data != null}")
                 if (data != null) {
                     startRecording(resultCode, data, width, height, density, bitrateValue, orientation)
@@ -277,33 +280,24 @@ class ScreenRecorderService : Service() {
         // Start audio recording with new combined system
         try {
             audioOutputFile = File(getExternalFilesDir(null), "combined_audio.wav")
-            
+
             // Get audio settings from user preferences
             CoroutineScope(Dispatchers.IO).launch {
                 val noiseSuppressionEnabled = settingsDataStore.noiseSuppression.first()
                 val micVolumeSetting = settingsDataStore.micVolume.first()
-                
-                combinedAudioRecorder = com.ibbie.catrec_gamingscreenrecorder.audio.CombinedAudioRecorder(
-                    context = this@ScreenRecorderService,
-                    mediaProjection = mediaProjection,
-                    outputFile = audioOutputFile,
-                    sampleRate = 44100,
-                    enableMic = recordMic,
-                    enableInternal = recordInternal,
-                    micVolume = micVolumeSetting / 100f,
-                    enableNoiseSuppression = noiseSuppressionEnabled
-                )
+
+                combinedAudioRecorder = CombinedAudioRecorder(context = this@ScreenRecorderService, mediaProjection = mediaProjection, outputFile = audioOutputFile, sampleRate = 44100, enableMic = true, enableInternal = true, micVolume = 1.0f, enableNoiseSuppression = false)
                 combinedAudioRecorder?.startRecording()
-                
+
                 // Show performance warning if recording both mic and internal audio
                 if (recordMic && recordInternal) {
                     val notificationManager = com.ibbie.catrec_gamingscreenrecorder.ui.ModernNotificationManager(this@ScreenRecorderService)
                     notificationManager.showPerformanceImpactWarning()
                 }
-                
+
                 Log.d("RecordingDebug", "Combined audio recording started successfully")
             }
-            
+
             if (autoHighlightDetection) {
                 startHighlightDetection()
             }
@@ -334,8 +328,8 @@ class ScreenRecorderService : Service() {
                     mediaCodec?.release()
                     mediaMuxer?.stop()
                     mediaMuxer?.release()
-                    micRecorder?.stopRecording()
-                    micRecorder = null
+                    combinedAudioRecorder?.stopRecording()
+                    combinedAudioRecorder = null
 
                     // Update output file path for MediaStore
                     val mediaStoreOutputFile = File(getExternalFilesDir(null), recordingFileName ?: "CatRec_unknown.mp4")
@@ -346,10 +340,10 @@ class ScreenRecorderService : Service() {
                     try {
                         Log.d("RecordingDebug", "Starting FFmpeg muxing...")
                         Log.d("RecordingDebug", "Video file: ${mediaStoreOutputFile.absolutePath} (exists: ${mediaStoreOutputFile.exists()}, size: ${mediaStoreOutputFile.length()} bytes)")
-                        Log.d("RecordingDebug", "Audio file: ${micOutputFile.absolutePath} (exists: ${micOutputFile.exists()}, size: ${micOutputFile.length()} bytes)")
+                        Log.d("RecordingDebug", "Audio file: ${audioOutputFile.absolutePath} (exists: ${audioOutputFile.exists()}, size: ${audioOutputFile.length()} bytes)")
                         Log.d("RecordingDebug", "Output file: ${outputFile.absolutePath}")
-                        
-                        val ffmpegCommand = "-i ${mediaStoreOutputFile.absolutePath} -i ${micOutputFile.absolutePath} -c:v copy -c:a aac -strict experimental ${outputFile.absolutePath}"
+
+                        val ffmpegCommand = "-i ${mediaStoreOutputFile.absolutePath} -i ${audioOutputFile.absolutePath} -c:v copy -c:a aac -strict experimental ${outputFile.absolutePath}"
                         FFmpegKit.executeAsync(ffmpegCommand) { session ->
                             val returnCode = session.returnCode
                             if (ReturnCode.isSuccess(returnCode)) {
@@ -428,7 +422,7 @@ class ScreenRecorderService : Service() {
                                     val highlightFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_highlights.json")
                                     val json = JSONArray(highlightTimestamps)
                                     highlightFile.writeText(json.toString())
-                                    
+
                                     // Trigger highlight clip extraction if enabled
                                     GlobalScope.launch(Dispatchers.Main) {
                                         val clipExtractionEnabled = settingsDataStore.autoHighlightClipExtraction.first()
@@ -449,10 +443,9 @@ class ScreenRecorderService : Service() {
                                     }
                                 }
                                 // Launch PlaybackActivity for preview
-                                val playbackIntent = Intent(this, PlaybackActivity::class.java).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                    putExtra("video_uri", outputFile.absolutePath)
-                                }
+                                val playbackIntent = Intent(this, PlaybackActivity::class.java)
+                                playbackIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                playbackIntent.putExtra("video_uri", outputFile.absolutePath)
                                 startActivity(playbackIntent)
 
                                 // Cloud backup if enabled
@@ -508,7 +501,7 @@ class ScreenRecorderService : Service() {
             return
         }
         Log.d("RecordingDebug", "Input surface created successfully")
-        
+
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "ScreenRecording",
             screenWidth, screenHeight, screenDensity,
@@ -634,7 +627,7 @@ class ScreenRecorderService : Service() {
         mediaCodec?.stop()
         mediaCodec?.release()
         virtualDisplay?.release()
-        
+
         // Unregister MediaProjection callback with null checks
         try {
             mediaProjectionCallback?.let { callback ->
@@ -648,7 +641,7 @@ class ScreenRecorderService : Service() {
                 logCrashlyticsIfEnabled("MediaProjection callback unregistration failed: ${e.message}", e, this@ScreenRecorderService)
             }
         }
-        
+
         // Stop MediaProjection
         mediaProjection?.stop()
 
@@ -667,12 +660,12 @@ class ScreenRecorderService : Service() {
             val videoFile = File(getExternalFilesDir(null), recordingFileName ?: "CatRec_unknown.mp4")
             val finalFileName = recordingFileName?.replace(".mp4", "_final.mp4") ?: "CatRec_unknown_final.mp4"
             val outputFile = File(getExternalFilesDir(null), finalFileName)
-            
+
             Log.d("RecordingDebug", "Starting FFmpeg muxing with combined audio...")
             Log.d("RecordingDebug", "Video file: ${videoFile.absolutePath} (exists: ${videoFile.exists()}, size: ${videoFile.length()} bytes)")
             Log.d("RecordingDebug", "Audio file: ${audioOutputFile.absolutePath} (exists: ${audioOutputFile.exists()}, size: ${audioOutputFile.length()} bytes)")
             Log.d("RecordingDebug", "Output file: ${outputFile.absolutePath}")
-            
+
             // Only mux if we have both video and audio
             if (videoFile.exists() && audioOutputFile.exists() && audioOutputFile.length() > 0) {
                 val ffmpegCommand = "-i ${videoFile.absolutePath} -i ${audioOutputFile.absolutePath} -c:v copy -c:a aac -strict experimental ${outputFile.absolutePath}"
@@ -797,27 +790,30 @@ class ScreenRecorderService : Service() {
                 }
             }
         }
-        
+
         // Generate thumbnail after muxing
         generateThumbnail(outputFile)
-        
+
         // Save highlight timestamps if any
         saveHighlightTimestamps(outputFile)
-        
+
         // Launch PlaybackActivity for preview
-        launchPlaybackActivity(outputFile)
-        
+        val playbackIntent = Intent(this, PlaybackActivity::class.java)
+        playbackIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        playbackIntent.putExtra("video_uri", outputFile.absolutePath)
+        startActivity(playbackIntent)
+
         // Cloud backup if enabled
         scheduleCloudBackup(outputFile)
     }
 
     private fun handleMuxingFailure(videoFile: File) {
         Log.w(TAG, "Using video-only file as fallback")
-        
+
         // Use video file as final output
         val finalFileName = recordingFileName?.replace(".mp4", "_video_only.mp4") ?: "CatRec_unknown_video_only.mp4"
         val outputFile = File(getExternalFilesDir(null), finalFileName)
-        
+
         try {
             if (videoFile.exists()) {
                 videoFile.copyTo(outputFile, overwrite = true)
@@ -860,7 +856,7 @@ class ScreenRecorderService : Service() {
             val highlightFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_highlights.json")
             val json = JSONArray(highlightTimestamps)
             highlightFile.writeText(json.toString())
-            
+
             // Trigger highlight clip extraction if enabled
             GlobalScope.launch(Dispatchers.Main) {
                 val clipExtractionEnabled = settingsDataStore.autoHighlightClipExtraction.first()
@@ -883,10 +879,9 @@ class ScreenRecorderService : Service() {
     }
 
     private fun launchPlaybackActivity(outputFile: File) {
-        val playbackIntent = Intent(this, PlaybackActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            putExtra("video_uri", outputFile.absolutePath)
-        }
+        val playbackIntent = Intent(this, PlaybackActivity::class.java)
+        playbackIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        playbackIntent.putExtra("video_uri", outputFile.absolutePath)
         startActivity(playbackIntent)
     }
 
@@ -919,7 +914,7 @@ class ScreenRecorderService : Service() {
                 recorder.resumeRecording()
             }
         }
-        
+
         if (isPaused) {
             pauseStartTime = System.currentTimeMillis()
             // Pause auto-stop timer
@@ -975,15 +970,15 @@ class ScreenRecorderService : Service() {
             val highlightThreshold = 20000 // Adjust as needed
             while (isRecording) {
                 delay(100) // Check every 100ms
-                
+
                 // For now, we'll use a simplified approach
                 // In a real implementation, you might want to access the audio data directly
                 // from the CombinedAudioRecorder
-                
+
                 // Placeholder for volume spike detection
                 // This would need to be implemented based on actual audio level monitoring
                 val timestamp = System.currentTimeMillis() - startTime
-                
+
                 // Simulate highlight detection (replace with real implementation)
                 if (timestamp > 0 && timestamp % 30000 == 0L) { // Every 30 seconds for demo
                     if (highlightTimestamps.isEmpty() || timestamp - highlightTimestamps.last() > 5000) {
