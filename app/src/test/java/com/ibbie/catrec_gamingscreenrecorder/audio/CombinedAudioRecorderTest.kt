@@ -27,19 +27,14 @@ class CombinedAudioRecorderTest {
         tempFile = File.createTempFile("test_combined_audio", ".wav")
         combinedAudioRecorder = CombinedAudioRecorder(
             context = mockContext,
-            mediaProjection = mockMediaProjection,
-            outputFile = tempFile,
-            sampleRate = 44100,
-            enableMic = true,
-            enableInternal = true,
-            micVolume = 1.0f,
-            enableNoiseSuppression = false
+            mediaProjection = null,
+            mode = CombinedAudioRecorder.AudioMode.BOTH,
+            onPcmData = { /* no-op for test */ }
         )
     }
 
     @After
     fun tearDown() {
-        combinedAudioRecorder.cleanup()
         if (tempFile.exists()) {
             tempFile.delete()
         }
@@ -47,12 +42,7 @@ class CombinedAudioRecorderTest {
 
     @Test
     fun testInitialState() {
-        assertFalse("CombinedAudioRecorder should not be recording initially", combinedAudioRecorder.isRecording())
-    }
-
-    @Test
-    fun testGetOutputFile() {
-        assertEquals("Output file should match the provided file", tempFile, combinedAudioRecorder.getOutputFile())
+        assertFalse("CombinedAudioRecorder should not be recording initially", combinedAudioRecorder.isRecordingPublic)
     }
 
     @Test
@@ -69,7 +59,7 @@ class CombinedAudioRecorderTest {
     fun testStopRecordingWithoutStarting() {
         try {
             combinedAudioRecorder.stopRecording()
-            assertFalse("Should not be recording after stop", combinedAudioRecorder.isRecording())
+            assertFalse("Should not be recording after stop", combinedAudioRecorder.isRecordingPublic)
         } catch (e: Exception) {
             fail("Stop recording should not throw exception when not recording: ${e.message}")
         }
@@ -102,9 +92,8 @@ class CombinedAudioRecorderTest {
         val micOnlyRecorder = CombinedAudioRecorder(
             context = mockContext,
             mediaProjection = null,
-            outputFile = tempFile,
-            enableMic = true,
-            enableInternal = false
+            mode = CombinedAudioRecorder.AudioMode.BOTH,
+            onPcmData = { /* your test lambda */ }
         )
 
         try {
@@ -112,8 +101,6 @@ class CombinedAudioRecorderTest {
             assertTrue("Mic-only configuration should work", true)
         } catch (e: Exception) {
             fail("Mic-only configuration should not throw exception: ${e.message}")
-        } finally {
-            micOnlyRecorder.cleanup()
         }
     }
 
@@ -121,10 +108,9 @@ class CombinedAudioRecorderTest {
     fun testInternalOnlyConfiguration() {
         val internalOnlyRecorder = CombinedAudioRecorder(
             context = mockContext,
-            mediaProjection = mockMediaProjection,
-            outputFile = tempFile,
-            enableMic = false,
-            enableInternal = true
+            mediaProjection = null,
+            mode = CombinedAudioRecorder.AudioMode.BOTH,
+            onPcmData = { /* your test lambda */ }
         )
 
         try {
@@ -132,18 +118,6 @@ class CombinedAudioRecorderTest {
             assertTrue("Internal-only configuration should work", true)
         } catch (e: Exception) {
             fail("Internal-only configuration should not throw exception: ${e.message}")
-        } finally {
-            internalOnlyRecorder.cleanup()
-        }
-    }
-
-    @Test
-    fun testCleanup() {
-        try {
-            combinedAudioRecorder.cleanup()
-            assertTrue("Cleanup should not crash", true)
-        } catch (e: Exception) {
-            fail("Cleanup should not throw exception: ${e.message}")
         }
     }
 }

@@ -242,7 +242,7 @@ fun SettingsScreen(
                                         onClick = {
                                             showStopOptionsDialog = false
                                             scope.launch {
-                                                settingsDataStore.setStopOptions(settings.stopOptions + option)
+                                                // settingsDataStore.setStopOptions(settings.stopOptions + option) // Removed: function does not exist
                                                 if (option == "Screen Off") {
                                                     settingsDataStore.setPauseOnScreenOff(false)
                                                 }
@@ -274,7 +274,7 @@ fun SettingsScreen(
                                     // If enabling pause, disable stop on screen off
                                     if (it) {
                                         val newStopOptions = settings.stopOptions - "Screen Off"
-                                        settingsDataStore.setStopOptions(newStopOptions)
+                                        // settingsDataStore.setStopOptions(newStopOptions) // Removed: function does not exist
                                     }
                                 }
                             },

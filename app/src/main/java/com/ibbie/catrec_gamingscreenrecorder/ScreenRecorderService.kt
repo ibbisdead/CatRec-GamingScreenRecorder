@@ -45,6 +45,8 @@ import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.ibbie.catrec_gamingscreenrecorder.AnalyticsManager
 import android.media.MediaScannerConnection
 import com.ibbie.catrec_gamingscreenrecorder.audio.CombinedAudioRecorder
+import android.os.Handler
+import android.os.Looper
 
 class ScreenRecorderService : Service() {
 
@@ -76,18 +78,22 @@ class ScreenRecorderService : Service() {
     private var startTime: Long = 0L
     private var pauseStartTime: Long = 0L
     private var totalPausedTime: Long = 0L
-    private var videoTrackIndex = -1
-    private var muxerStarted = false
-    private var recordingFileName: String? = null
+    private var videoTrackIndex: Int = -1
+    private var audioTrackIndex: Int = -1
+    private var muxerStarted: Boolean = false
+    private var audioFormatReady = false
+    private var videoFormatReady = false
 
     private var micRecorder: MicRecorder? = null
     private var combinedAudioRecorder: CombinedAudioRecorder? = null
-    private lateinit var audioOutputFile: File
+    private lateinit var audioEncoder: MediaCodec
+    private val audioBufferInfo = MediaCodec.BufferInfo()
 
     private var isMicMuted = false
     private var micMuteEnabled = false
     private var highlightTimestamps = mutableListOf<Long>()
     private var autoHighlightDetection = false
+    private var recordingFileName: String? = null
 
     private val stopRecordingReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -274,33 +280,49 @@ class ScreenRecorderService : Service() {
         bitrate = bitrateValue
 
         // Create output file
-        outputFile = File(getExternalFilesDir(null), recordingFileName!!)
+        outputFile = File(getExternalFilesDir(null), recordingFileName ?: "CatRec_unknown.mp4")
         Log.d("RecordingDebug", "Output file created: ${outputFile?.absolutePath}")
 
         // Start audio recording with new combined system
         try {
-            audioOutputFile = File(getExternalFilesDir(null), "combined_audio.wav")
+            val sampleRate = 44100
+            val channelCount = 1
+            val bitRate = 128_000
+            val audioFormat = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, channelCount)
+            audioFormat.setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+            audioFormat.setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+            audioEncoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+            audioEncoder.configure(audioFormat, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+            audioEncoder.start()
 
-            // Get audio settings from user preferences
-            CoroutineScope(Dispatchers.IO).launch {
-                val noiseSuppressionEnabled = settingsDataStore.noiseSuppression.first()
-                val micVolumeSetting = settingsDataStore.micVolume.first()
+            mediaMuxer = MediaMuxer(outputFile!!.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxerStarted = false
 
-                combinedAudioRecorder = CombinedAudioRecorder(context = this@ScreenRecorderService, mediaProjection = mediaProjection, outputFile = audioOutputFile, sampleRate = 44100, enableMic = true, enableInternal = true, micVolume = 1.0f, enableNoiseSuppression = false)
-                combinedAudioRecorder?.startRecording()
-
-                // Show performance warning if recording both mic and internal audio
-                if (recordMic && recordInternal) {
-                    val notificationManager = com.ibbie.catrec_gamingscreenrecorder.ui.ModernNotificationManager(this@ScreenRecorderService)
-                    notificationManager.showPerformanceImpactWarning()
+            // Set up CombinedAudioRecorder with selected mode:
+            val audioMode = when {
+                recordMic && recordInternal -> CombinedAudioRecorder.AudioMode.BOTH
+                recordMic -> CombinedAudioRecorder.AudioMode.MIC
+                recordInternal -> CombinedAudioRecorder.AudioMode.SYSTEM
+                else -> CombinedAudioRecorder.AudioMode.MIC // fallback
+            }
+            combinedAudioRecorder = CombinedAudioRecorder(
+                context = this@ScreenRecorderService,
+                mediaProjection = mediaProjection,
+                mode = audioMode,
+                sampleRate = sampleRate,
+                onPcmData = { pcmBuffer ->
+                    encodeAndMuxAudio(pcmBuffer)
                 }
+            )
+            combinedAudioRecorder?.startRecording()
 
-                Log.d("RecordingDebug", "Combined audio recording started successfully")
+            // Show performance warning if recording both mic and internal audio
+            if (recordMic && recordInternal) {
+                val notificationManager = com.ibbie.catrec_gamingscreenrecorder.ui.ModernNotificationManager(this@ScreenRecorderService)
+                notificationManager.showPerformanceImpactWarning()
             }
 
-            if (autoHighlightDetection) {
-                startHighlightDetection()
-            }
+            Log.d("RecordingDebug", "Combined audio recording started successfully")
         } catch (e: Exception) {
             Log.e(TAG, "Combined audio recording failed: ${e.message}")
             CoroutineScope(Dispatchers.IO).launch {
@@ -324,8 +346,8 @@ class ScreenRecorderService : Service() {
                     stopSelf()
 
                     // Finalize muxer and audio
-                    mediaCodec?.stop()
-                    mediaCodec?.release()
+                    audioEncoder.stop()
+                    audioEncoder.release()
                     mediaMuxer?.stop()
                     mediaMuxer?.release()
                     combinedAudioRecorder?.stopRecording()
@@ -336,14 +358,14 @@ class ScreenRecorderService : Service() {
                     val finalFileName = recordingFileName?.replace(".mp4", "_with_audio.mp4") ?: "CatRec_unknown_with_audio.mp4"
                     val outputFile = File(getExternalFilesDir(null), finalFileName)
 
-                    // Mux mic audio with video using FFmpegKit
+                    // Mux mic audio with video using FFFFFFmpegKit
                     try {
                         Log.d("RecordingDebug", "Starting FFmpeg muxing...")
                         Log.d("RecordingDebug", "Video file: ${mediaStoreOutputFile.absolutePath} (exists: ${mediaStoreOutputFile.exists()}, size: ${mediaStoreOutputFile.length()} bytes)")
-                        Log.d("RecordingDebug", "Audio file: ${audioOutputFile.absolutePath} (exists: ${audioOutputFile.exists()}, size: ${audioOutputFile.length()} bytes)")
+                        Log.d("RecordingDebug", "Audio file: ${outputFile.absolutePath} (exists: ${outputFile.exists()}, size: ${outputFile.length()} bytes)")
                         Log.d("RecordingDebug", "Output file: ${outputFile.absolutePath}")
 
-                        val ffmpegCommand = "-i ${mediaStoreOutputFile.absolutePath} -i ${audioOutputFile.absolutePath} -c:v copy -c:a aac -strict experimental ${outputFile.absolutePath}"
+                        val ffmpegCommand = "-i ${mediaStoreOutputFile.absolutePath} -i ${outputFile.absolutePath} -c:v copy -c:a aac -strict experimental ${outputFile.absolutePath}"
                         FFmpegKit.executeAsync(ffmpegCommand) { session ->
                             val returnCode = session.returnCode
                             if (ReturnCode.isSuccess(returnCode)) {
@@ -417,35 +439,10 @@ class ScreenRecorderService : Service() {
                                         }
                                     }
                                 }
-                                // After muxing, save highlight timestamps if any
-                                if (autoHighlightDetection && highlightTimestamps.isNotEmpty()) {
-                                    val highlightFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_highlights.json")
-                                    val json = JSONArray(highlightTimestamps)
-                                    highlightFile.writeText(json.toString())
-
-                                    // Trigger highlight clip extraction if enabled
-                                    GlobalScope.launch(Dispatchers.Main) {
-                                        val clipExtractionEnabled = settingsDataStore.autoHighlightClipExtraction.first()
-                                        val clipLength = settingsDataStore.highlightClipLength.first()
-                                        if (clipExtractionEnabled) {
-                                            val data = workDataOf(
-                                                "video_path" to outputFile.absolutePath,
-                                                "highlight_timestamps" to json.toString(),
-                                                "clip_length" to clipLength
-                                            )
-                                            val request = OneTimeWorkRequestBuilder<HighlightClipExtractionWorker>()
-                                                .setInputData(data)
-                                                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-                                                .build()
-                                            WorkManager.getInstance(this@ScreenRecorderService).enqueue(request)
-                                            Log.d(TAG, "Highlight clip extraction queued for ${highlightTimestamps.size} highlights")
-                                        }
-                                    }
-                                }
                                 // Launch PlaybackActivity for preview
-                                val playbackIntent = Intent(this, PlaybackActivity::class.java)
+                                val playbackIntent = Intent(this@ScreenRecorderService, PlaybackActivity::class.java)
                                 playbackIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                playbackIntent.putExtra("video_uri", outputFile.absolutePath)
+                                playbackIntent.putExtra("video_uri", outputFile?.absolutePath ?: "")
                                 startActivity(playbackIntent)
 
                                 // Cloud backup if enabled
@@ -453,10 +450,11 @@ class ScreenRecorderService : Service() {
                                     val backupEnabled = settingsDataStore.cloudBackupEnabled.first()
                                     val provider = settingsDataStore.cloudBackupProvider.first()
                                     if (backupEnabled) {
+                                        val providerString = provider?.toString() ?: ""
                                         val data = workDataOf(
-                                            "video_path" to outputFile.absolutePath,
-                                            "thumbnail_path" to (outputFile.parent + "/" + outputFile.nameWithoutExtension + "_thumbnail.png"),
-                                            "provider" to provider
+                                            "video_path" to (outputFile?.absolutePath ?: ""),
+                                            "thumbnail_path" to (outputFile?.parent + "/" + outputFile?.nameWithoutExtension + "_thumbnail.png"),
+                                            "provider" to providerString
                                         )
                                         val request = OneTimeWorkRequestBuilder<CloudBackupWorker>()
                                             .setInputData(data)
@@ -501,6 +499,12 @@ class ScreenRecorderService : Service() {
             return
         }
         Log.d("RecordingDebug", "Input surface created successfully")
+
+        mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+            override fun onStop() {
+                // handle stop
+            }
+        }, Handler(Looper.getMainLooper()))
 
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "ScreenRecording",
@@ -558,13 +562,16 @@ class ScreenRecorderService : Service() {
                 }
                 MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     Log.d("RecordingDebug", "MediaCodec output format changed")
-                    if (!muxerStarted) {
+                    if (!videoFormatReady) {
                         val format = mediaCodec?.outputFormat
                         if (format != null) {
                             videoTrackIndex = mediaMuxer?.addTrack(format) ?: -1
-                            mediaMuxer?.start()
-                            muxerStarted = true
-                            Log.d("RecordingDebug", "MediaMuxer started successfully, videoTrackIndex: $videoTrackIndex")
+                            videoFormatReady = true
+                            if (audioFormatReady && !muxerStarted) {
+                                mediaMuxer?.start()
+                                muxerStarted = true
+                                Log.d("RecordingDebug", "MediaMuxer started successfully, videoTrackIndex: $videoTrackIndex, audioTrackIndex: $audioTrackIndex")
+                            }
                         } else {
                             Log.e("RecordingDebug", "MediaCodec output format is null")
                         }
@@ -590,6 +597,40 @@ class ScreenRecorderService : Service() {
             }
         }
         Log.d("RecordingDebug", "Encoding thread finished, total frames processed: $frameCount")
+    }
+
+    private fun encodeAndMuxAudio(pcmData: ByteArray) {
+        val inputBufferIndex = audioEncoder.dequeueInputBuffer(10000)
+        if (inputBufferIndex >= 0) {
+            val inputBuffer = audioEncoder.getInputBuffer(inputBufferIndex)
+            inputBuffer?.clear()
+            inputBuffer?.put(pcmData)
+            val presentationTimeUs = System.nanoTime() / 1000
+            audioEncoder.queueInputBuffer(inputBufferIndex, 0, pcmData.size, presentationTimeUs, 0)
+        }
+        while (true) {
+            val outputBufferIndex = audioEncoder.dequeueOutputBuffer(audioBufferInfo, 0)
+            if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                break
+            } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                if (!audioFormatReady) {
+                    audioTrackIndex = mediaMuxer?.addTrack(audioEncoder.outputFormat) ?: -1
+                    audioFormatReady = true
+                    if (videoFormatReady && !muxerStarted) {
+                        mediaMuxer?.start()
+                        muxerStarted = true
+                    }
+                }
+            } else if (outputBufferIndex >= 0) {
+                if (muxerStarted) {
+                    val encodedData = audioEncoder.getOutputBuffer(outputBufferIndex)
+                    encodedData?.position(audioBufferInfo.offset)
+                    encodedData?.limit(audioBufferInfo.offset + audioBufferInfo.size)
+                    mediaMuxer?.writeSampleData(audioTrackIndex, encodedData!!, audioBufferInfo)
+                }
+                audioEncoder.releaseOutputBuffer(outputBufferIndex, false)
+            }
+        }
     }
 
     private fun stopRecording() {
@@ -663,12 +704,12 @@ class ScreenRecorderService : Service() {
 
             Log.d("RecordingDebug", "Starting FFmpeg muxing with combined audio...")
             Log.d("RecordingDebug", "Video file: ${videoFile.absolutePath} (exists: ${videoFile.exists()}, size: ${videoFile.length()} bytes)")
-            Log.d("RecordingDebug", "Audio file: ${audioOutputFile.absolutePath} (exists: ${audioOutputFile.exists()}, size: ${audioOutputFile.length()} bytes)")
+            Log.d("RecordingDebug", "Audio file: ${outputFile.absolutePath} (exists: ${outputFile.exists()}, size: ${outputFile.length()} bytes)")
             Log.d("RecordingDebug", "Output file: ${outputFile.absolutePath}")
 
             // Only mux if we have both video and audio
-            if (videoFile.exists() && audioOutputFile.exists() && audioOutputFile.length() > 0) {
-                val ffmpegCommand = "-i ${videoFile.absolutePath} -i ${audioOutputFile.absolutePath} -c:v copy -c:a aac -strict experimental ${outputFile.absolutePath}"
+            if (videoFile.exists() && outputFile.exists() && outputFile.length() > 0) {
+                val ffmpegCommand = "-i ${videoFile.absolutePath} -i ${outputFile.absolutePath} -c:v copy -c:a aac -strict experimental ${outputFile.absolutePath}"
                 FFmpegKit.executeAsync(ffmpegCommand) { session ->
                     val returnCode = session.returnCode
                     if (ReturnCode.isSuccess(returnCode)) {
@@ -794,13 +835,10 @@ class ScreenRecorderService : Service() {
         // Generate thumbnail after muxing
         generateThumbnail(outputFile)
 
-        // Save highlight timestamps if any
-        saveHighlightTimestamps(outputFile)
-
         // Launch PlaybackActivity for preview
-        val playbackIntent = Intent(this, PlaybackActivity::class.java)
+        val playbackIntent = Intent(this@ScreenRecorderService, PlaybackActivity::class.java)
         playbackIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        playbackIntent.putExtra("video_uri", outputFile.absolutePath)
+        playbackIntent.putExtra("video_uri", outputFile?.absolutePath ?: "")
         startActivity(playbackIntent)
 
         // Cloud backup if enabled
@@ -851,33 +889,6 @@ class ScreenRecorderService : Service() {
         }
     }
 
-    private fun saveHighlightTimestamps(outputFile: File) {
-        if (autoHighlightDetection && highlightTimestamps.isNotEmpty()) {
-            val highlightFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_highlights.json")
-            val json = JSONArray(highlightTimestamps)
-            highlightFile.writeText(json.toString())
-
-            // Trigger highlight clip extraction if enabled
-            GlobalScope.launch(Dispatchers.Main) {
-                val clipExtractionEnabled = settingsDataStore.autoHighlightClipExtraction.first()
-                val clipLength = settingsDataStore.highlightClipLength.first()
-                if (clipExtractionEnabled) {
-                    val data = workDataOf(
-                        "video_path" to outputFile.absolutePath,
-                        "highlight_timestamps" to json.toString(),
-                        "clip_length" to clipLength
-                    )
-                    val request = OneTimeWorkRequestBuilder<HighlightClipExtractionWorker>()
-                        .setInputData(data)
-                        .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-                        .build()
-                    WorkManager.getInstance(this@ScreenRecorderService).enqueue(request)
-                    Log.d(TAG, "Highlight clip extraction queued for ${highlightTimestamps.size} highlights")
-                }
-            }
-        }
-    }
-
     private fun launchPlaybackActivity(outputFile: File) {
         val playbackIntent = Intent(this, PlaybackActivity::class.java)
         playbackIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
@@ -885,15 +896,16 @@ class ScreenRecorderService : Service() {
         startActivity(playbackIntent)
     }
 
-    private fun scheduleCloudBackup(outputFile: File) {
+    private fun scheduleCloudBackup(outputFile: File?) {
         GlobalScope.launch(Dispatchers.Main) {
             val backupEnabled = settingsDataStore.cloudBackupEnabled.first()
             val provider = settingsDataStore.cloudBackupProvider.first()
             if (backupEnabled) {
+                val providerString = provider?.toString() ?: ""
                 val data = workDataOf(
-                    "video_path" to outputFile.absolutePath,
-                    "thumbnail_path" to (outputFile.parent + "/" + outputFile.nameWithoutExtension + "_thumbnail.png"),
-                    "provider" to provider
+                    "video_path" to (outputFile?.absolutePath ?: ""),
+                    "thumbnail_path" to (outputFile?.parent + "/" + outputFile?.nameWithoutExtension + "_thumbnail.png"),
+                    "provider" to providerString
                 )
                 val request = OneTimeWorkRequestBuilder<CloudBackupWorker>()
                     .setInputData(data)
