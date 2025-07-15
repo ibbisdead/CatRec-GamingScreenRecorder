@@ -1,6 +1,11 @@
 package com.ibbie.catrec_gamingscreenrecorder.ui
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.dp
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.Handler
@@ -31,7 +36,7 @@ class GestureToast(private val context: Context) {
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
-            WindowManager.LayoutParams.TYPE_PHONE
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         }
 
         val params = WindowManager.LayoutParams(
@@ -71,5 +76,37 @@ class GestureToast(private val context: Context) {
             windowManager?.removeView(toastView)
         } catch (_: Exception) { }
         toastView = null
+    }
+}
+
+/**
+ * Modern Compose-based gesture toast that uses StyledOverlayToast.
+ * This provides a more consistent Material 3 design and better integration with Compose.
+ */
+@androidx.compose.runtime.Composable
+fun GestureToastCompose(
+    message: String,
+    isVisible: Boolean,
+    onDismiss: () -> Unit,
+    modifier: androidx.compose.ui.Modifier = androidx.compose.ui.Modifier
+) {
+    if (isVisible) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = isVisible,
+            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically(),
+            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically(),
+            modifier = modifier
+        ) {
+            Box(
+                modifier = androidx.compose.ui.Modifier.fillMaxSize(),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                StyledOverlayToast(
+                    message = message,
+                    modifier = androidx.compose.ui.Modifier
+                        .padding(top = 100.dp)
+                )
+            }
+        }
     }
 } 

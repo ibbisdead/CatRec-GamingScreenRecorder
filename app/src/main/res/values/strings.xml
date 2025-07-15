@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name">CatRec Gaming Screen Recorder</string>
-    <string name="overlay_permission_required">Overlay permission is required to display the floating controls.</string>
     <string name="permission_denied">Permission denied.</string>
     <string name="recording_started">Recording started</string>
     <string name="recording_stopped">Recording stopped</string>
@@ -12,8 +11,8 @@
     <string name="start_recording">Start recording</string>
     <string name="pause_recording">Pause</string>
     <string name="resume_recording">Resume</string>
-    <string name="overlay_icon_desc">Recording controls</string>
     <string name="pause_resume_recording">Pause or resume recording</string>
     <string name="mic_mute_unmute">Mute or unmute microphone</string>
     <string name="toggle_mic">Toggle Mic</string>
+    <string name="ad_unit_id">ca-app-pub-7741372232895726/3753282793</string>
 </resources>

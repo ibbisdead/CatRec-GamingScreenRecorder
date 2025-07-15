@@ -11,7 +11,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -21,7 +21,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat.startActivity
 import com.ibbie.catrec_gamingscreenrecorder.PlaybackActivity
 import java.io.File
 import android.graphics.BitmapFactory
@@ -55,7 +54,7 @@ fun GalleryScreen(onBack: () -> Unit) {
                 title = { Text("Recordings") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 }
             )
@@ -79,7 +78,7 @@ fun GalleryScreen(onBack: () -> Unit) {
                         val intent = Intent(context, PlaybackActivity::class.java).apply {
                             putExtra("video_uri", item.videoFile.absolutePath)
                         }
-                        startActivity(context, intent, null)
+                        context.startActivity(intent, null)
                     })
                 }
             }

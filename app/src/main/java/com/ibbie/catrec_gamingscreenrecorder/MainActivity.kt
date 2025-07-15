@@ -15,6 +15,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -22,13 +23,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
@@ -38,7 +37,7 @@ import androidx.navigation.compose.rememberNavController
 import com.ibbie.catrec_gamingscreenrecorder.ui.screens.RecordingScreen
 import com.ibbie.catrec_gamingscreenrecorder.ui.screens.SettingsScreen
 import com.ibbie.catrec_gamingscreenrecorder.ui.screens.SupportScreen
-import com.ibbie.catrec_gamingscreenrecorder.ui.theme.CatRecGamingScreenRecorderTheme
+import com.ibbie.catrec_gamingscreenrecorder.ui.theme.CatRecTheme
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -50,17 +49,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import com.ibbie.catrec_gamingscreenrecorder.ui.CountdownOverlay
-import com.ibbie.catrec_gamingscreenrecorder.SettingsDataStore
 import android.os.Environment
 import android.os.StatFs
-import com.ibbie.catrec_gamingscreenrecorder.ui.screens.GalleryScreen
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.Data
-import java.util.concurrent.TimeUnit
-import com.ibbie.catrec_gamingscreenrecorder.AnalyticsManager
 import kotlinx.coroutines.Dispatchers
-import com.ibbie.catrec_gamingscreenrecorder.UpdateManager
+import com.google.android.gms.ads.MobileAds
+import com.google.firebase.FirebaseApp
+import kotlin.OptIn
 
 class MainActivity : ComponentActivity() {
 
@@ -129,13 +123,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        updateManager.handleUpdateResult(requestCode, resultCode)
-    }
+    // Remove the deprecated onActivityResult method and replace with Activity Result API
+    // 1. Define a property at the top of the class:
+    private lateinit var startForResult: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        FirebaseApp.initializeApp(this)
+        
+        // Initialize MobileAds
+        MobileAds.initialize(this) {}
         
         // Suppress FFmpeg deprecation warnings
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -166,7 +163,7 @@ class MainActivity : ComponentActivity() {
         }
         
         setContent {
-            var currentDarkTheme by remember { mutableStateOf(isDarkTheme) }
+            var isDarkTheme by rememberSaveable { mutableStateOf(this.isDarkTheme) }
             val snackbarHostState = remember { this@MainActivity.snackbarHostState }
             val coroutineScope = rememberCoroutineScope()
             var showMicRationale by remember { mutableStateOf(false) }
@@ -174,11 +171,8 @@ class MainActivity : ComponentActivity() {
             var rationaleRequested by remember { mutableStateOf(false) }
             var showStorageDialog by remember { mutableStateOf(false) }
             var proceedWithLowStorage by remember { mutableStateOf(false) }
-            var showGallery by remember { mutableStateOf(false) }
-            CatRecGamingScreenRecorderTheme(
-                darkTheme = currentDarkTheme,
-                dynamicColor = false
-            ) {
+            
+            CatRecTheme(darkTheme = isDarkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
@@ -194,10 +188,8 @@ class MainActivity : ComponentActivity() {
                             },
                             onThemeChange = { darkTheme ->
                                 isDarkTheme = darkTheme
-                                currentDarkTheme = darkTheme
                             },
-                            showGallery = showGallery,
-                            onShowGalleryChange = { showGallery = it }
+                            darkTheme = isDarkTheme
                         )
                         SnackbarHost(
                             hostState = snackbarHostState,
@@ -269,9 +261,6 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         }
-                        if (showGallery) {
-                            GalleryScreen(onBack = { showGallery = false })
-                        }
                     }
                 }
             }
@@ -288,6 +277,14 @@ class MainActivity : ComponentActivity() {
             val autoUpdateCheckEnabled = settingsDataStore.autoUpdateCheckEnabled.first()
             if (autoUpdateCheckEnabled) {
                 updateManager.checkForUpdates(this@MainActivity)
+            }
+        }
+
+        // 2. In onCreate or init block, initialize the launcher:
+        startForResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode == Activity.RESULT_OK) {
+                val data = result.data
+                // Handle the result here
             }
         }
     }
@@ -319,15 +316,14 @@ class MainActivity : ComponentActivity() {
     fun CatRecApp(
         onStartRecording: (Boolean, Boolean, String) -> Unit,
         onThemeChange: (Boolean) -> Unit,
-        showGallery: Boolean,
-        onShowGalleryChange: (Boolean) -> Unit
+        darkTheme: Boolean
     ) {
         val navController = rememberNavController()
         
         Scaffold(
             bottomBar = {
                 NavigationBar(
-                    containerColor = if (isDarkTheme) Color.Black else Color.White,
+                    containerColor = if (darkTheme) Color.Black else Color.White,
                     contentColor = Color(0xFFD32F2F) // Red color for icons
                 ) {
                     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -362,12 +358,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     )
-                    NavigationBarItem(
-                        icon = { Icon(Icons.Filled.PhotoLibrary, contentDescription = "Recordings") },
-                        label = { Text("Recordings", fontWeight = FontWeight.Bold) },
-                        selected = showGallery,
-                        onClick = { onShowGalleryChange(true) }
-                    )
                     
                     NavigationBarItem(
                         icon = { Text("🐱", style = MaterialTheme.typography.titleLarge) },
@@ -394,26 +384,24 @@ class MainActivity : ComponentActivity() {
                 composable("recording") {
                     RecordingScreen(
                         onStartRecording = onStartRecording,
-                        darkTheme = isDarkTheme
+                        darkTheme = darkTheme
                     )
                 }
                 composable("settings") {
                     SettingsScreen(
-                        navController = navController,
-                        darkTheme = isDarkTheme,
-                        onThemeChange = onThemeChange,
-                        onStartRecording = onStartRecording
+                        darkTheme = darkTheme,
+                        onThemeChange = onThemeChange
                     )
                 }
                 composable("scheduling") {
                     com.ibbie.catrec_gamingscreenrecorder.ui.screens.SchedulingScreen(
                         navController = navController,
-                        darkTheme = isDarkTheme
+                        darkTheme = darkTheme
                     )
                 }
                 composable("support") {
                     SupportScreen(
-                        darkTheme = isDarkTheme,
+                        darkTheme = darkTheme,
                         onStartRecording = { mic, internal -> onStartRecording(mic, internal, "Auto") }
                     )
                 }
@@ -488,7 +476,7 @@ class MainActivity : ComponentActivity() {
                         countdownOverlay = CountdownOverlay(this@MainActivity)
                     }
                     countdownOverlay?.showCountdown(countdown) {
-                        startRecordingService(orientation)
+                            startRecordingService(orientation)
                     }
                 }
             }
@@ -518,13 +506,14 @@ class MainActivity : ComponentActivity() {
     private fun startRecordingService(orientation: String) {
         projectionIntent?.let { data ->
             val intent = Intent(this, ScreenRecorderService::class.java).apply {
+                action = "START_RECORDING"
                 putExtra("resultCode", projectionResultCode)
                 putExtra("data", data)
                 putExtra("recordMic", recordMic)
                 putExtra("recordInternalAudio", recordInternal)
                 putExtra("orientation", orientation)
             }
-            startForegroundService(intent)
+                startForegroundService(intent)
         }
     }
 

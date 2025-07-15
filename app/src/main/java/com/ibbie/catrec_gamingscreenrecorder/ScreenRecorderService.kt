@@ -1,10 +1,12 @@
 package com.ibbie.catrec_gamingscreenrecorder
 
 import android.app.*
+import android.app.Service.STOP_FOREGROUND_REMOVE
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.ServiceInfo
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
@@ -17,7 +19,6 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
-import overlay.RecordingOverlay
 import java.io.File
 import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
@@ -42,6 +43,7 @@ import org.json.JSONArray
 import kotlin.math.abs
 import com.google.firebase.crashlytics.FirebaseCrashlytics
 import com.ibbie.catrec_gamingscreenrecorder.AnalyticsManager
+import android.media.MediaScannerConnection
 
 class ScreenRecorderService : Service() {
 
@@ -54,10 +56,11 @@ class ScreenRecorderService : Service() {
     }
 
     private var mediaProjection: MediaProjection? = null
+    private var mediaProjectionCallback: MediaProjection.Callback? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var mediaCodec: MediaCodec? = null
     private var mediaMuxer: MediaMuxer? = null
-    private var recordingOverlay: RecordingOverlay? = null
+    // REMOVE: All references to RecordingOverlay, recordingOverlay variable, and overlay logic
 
     private var screenWidth = 0
     private var screenHeight = 0
@@ -107,12 +110,21 @@ class ScreenRecorderService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        registerReceiver(stopRecordingReceiver, IntentFilter("com.ibbie.ACTION_STOP_RECORDING"))
-        registerReceiver(controlReceiver, IntentFilter().apply {
-            addAction("com.ibbie.ACTION_STOP_RECORDING")
-            addAction("com.ibbie.ACTION_TOGGLE_PAUSE")
-            addAction("com.ibbie.ACTION_TOGGLE_MIC")
-        })
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(stopRecordingReceiver, IntentFilter("com.ibbie.ACTION_STOP_RECORDING"), Context.RECEIVER_NOT_EXPORTED)
+            registerReceiver(controlReceiver, IntentFilter().apply {
+                addAction("com.ibbie.ACTION_STOP_RECORDING")
+                addAction("com.ibbie.ACTION_TOGGLE_PAUSE")
+                addAction("com.ibbie.ACTION_TOGGLE_MIC")
+            }, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(stopRecordingReceiver, IntentFilter("com.ibbie.ACTION_STOP_RECORDING"))
+            registerReceiver(controlReceiver, IntentFilter().apply {
+                addAction("com.ibbie.ACTION_STOP_RECORDING")
+                addAction("com.ibbie.ACTION_TOGGLE_PAUSE")
+                addAction("com.ibbie.ACTION_TOGGLE_MIC")
+            })
+        }
         // Read pauseEnabled, micMuteEnabled, and autoHighlightDetection from settings
         kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             pauseEnabled = settingsDataStore.pauseEnabled.first()
@@ -122,21 +134,46 @@ class ScreenRecorderService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d("RecordingDebug", "ScreenRecorderService onStartCommand called with action: ${intent?.action}")
+        
+        // Start foreground service immediately with proper type for MediaProjection
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification()
+            )
+        }
+        
         when (intent?.action) {
             "START_RECORDING" -> {
                 val resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED)
-                val data = intent.getParcelableExtra<Intent>("data")
+                val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra("data", Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra("data")
+                }
                 val width = intent.getIntExtra("width", 1920)
                 val height = intent.getIntExtra("height", 1080)
                 val density = intent.getIntExtra("density", 1)
                 val bitrateValue = intent.getIntExtra("bitrate", 8000000)
-                val orientation = intent.getIntExtra("orientation", 0)
+                val orientation = intent.getStringExtra("orientation") ?: "Auto"
                 
+                Log.d("RecordingDebug", "Starting recording with resultCode: $resultCode, data: ${data != null}")
                 if (data != null) {
                     startRecording(resultCode, data, width, height, density, bitrateValue, orientation)
+                } else {
+                    Log.e("RecordingDebug", "MediaProjection data is null, cannot start recording")
                 }
             }
             "STOP_RECORDING" -> {
+                Log.d("RecordingDebug", "Stopping recording")
                 stopRecording()
             }
         }
@@ -180,15 +217,20 @@ class ScreenRecorderService : Service() {
         height: Int,
         density: Int,
         bitrateValue: Int,
-        orientation: Int
+        orientation: String
     ) {
-        if (isRecording) return
+        Log.d("RecordingDebug", "startRecording called with dimensions: ${width}x${height}, bitrate: $bitrateValue")
+        if (isRecording) {
+            Log.w("RecordingDebug", "Recording already in progress, ignoring start request")
+            return
+        }
 
         vibrateStart()
 
         // Generate timestamped file name
         val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
         recordingFileName = "CatRec_${timestamp}.mp4"
+        Log.d("RecordingDebug", "Recording filename: $recordingFileName")
 
         // Read selected resolution
         var targetWidth = width
@@ -200,11 +242,13 @@ class ScreenRecorderService : Service() {
                 // "Native" or unknown: use provided width/height
             }
         }
+        Log.d("RecordingDebug", "Target resolution: ${targetWidth}x${targetHeight}")
 
         // Auto-stop timer
         GlobalScope.launch(Dispatchers.Main) {
             val minutes = settingsDataStore.autoStopMinutes.first()
             if (minutes > 0) {
+                Log.d("RecordingDebug", "Auto-stop timer set for $minutes minutes")
                 autoStopJob?.cancel()
                 autoStopJob = GlobalScope.launch(Dispatchers.Main) {
                     delay(minutes.toLong() * 60L * 1000L)
@@ -217,17 +261,8 @@ class ScreenRecorderService : Service() {
         }
 
         // Show recording indicator overlay
-        if (recordingOverlay == null) {
-            recordingOverlay = RecordingOverlay(this)
-        }
-        recordingOverlay?.show()
-        recordingOverlay?.onPauseResume = {
-            if (pauseEnabled) togglePauseResume()
-        }
-        recordingOverlay?.onMicMuteToggle = {
-            if (micMuteEnabled) toggleMicMute()
-        }
-        recordingOverlay?.setMicMuted(isMicMuted)
+        // REMOVE: All references to RecordingOverlay, recordingOverlay variable, and overlay logic
+        Log.d("RecordingDebug", "Recording overlay shown")
 
         screenWidth = targetWidth
         screenHeight = targetHeight
@@ -236,18 +271,27 @@ class ScreenRecorderService : Service() {
 
         // Create output file
         outputFile = File(getExternalFilesDir(null), recordingFileName!!)
+        Log.d("RecordingDebug", "Output file created: ${outputFile?.absolutePath}")
 
         // Start mic recording
         try {
             micOutputFile = File(getExternalFilesDir(null), "mic_audio.aac")
-            micRecorder = MicRecorder(
-                context = this,
-                outputFile = micOutputFile,
-                sampleRate = 44100,
-                enableNoiseSuppressor = true,
-                micVolume = 1.0f
-            )
-            micRecorder?.startRecording()
+            
+            // Get noise suppression setting from user preferences
+            CoroutineScope(Dispatchers.IO).launch {
+                val noiseSuppressionEnabled = settingsDataStore.noiseSuppression.first()
+                val micVolumeSetting = settingsDataStore.micVolume.first()
+                
+                micRecorder = MicRecorder(
+                    context = this@ScreenRecorderService,
+                    outputFile = micOutputFile,
+                    sampleRate = 44100,
+                    enableNoiseSuppressor = noiseSuppressionEnabled,
+                    micVolume = micVolumeSetting / 100f
+                )
+                micRecorder?.startRecording()
+                Log.d("RecordingDebug", "Mic recording started successfully")
+            }
             if (autoHighlightDetection) {
                 startHighlightDetection()
             }
@@ -261,6 +305,174 @@ class ScreenRecorderService : Service() {
         // Set up MediaProjection
         val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         mediaProjection = projectionManager.getMediaProjection(resultCode, data)
+        if (mediaProjection != null) {
+            Log.d("RecordingDebug", "MediaProjection created successfully")
+            // Register MediaProjection callback BEFORE using the projection
+            mediaProjectionCallback = object : MediaProjection.Callback() {
+                override fun onStop() {
+                    Log.d(TAG, "MediaProjection callback: onStop called")
+                    Log.d("RecordingDebug", "MediaProjection stopped by system - this might indicate the recording was interrupted")
+                    // Release virtual display and stop service
+                    virtualDisplay?.release()
+                    virtualDisplay = null
+                    stopSelf()
+
+                    // Finalize muxer and audio
+                    mediaCodec?.stop()
+                    mediaCodec?.release()
+                    mediaMuxer?.stop()
+                    mediaMuxer?.release()
+                    micRecorder?.stopRecording()
+                    micRecorder = null
+
+                    // Update output file path for MediaStore
+                    val mediaStoreOutputFile = File(getExternalFilesDir(null), recordingFileName ?: "CatRec_unknown.mp4")
+                    val finalFileName = recordingFileName?.replace(".mp4", "_with_audio.mp4") ?: "CatRec_unknown_with_audio.mp4"
+                    val outputFile = File(getExternalFilesDir(null), finalFileName)
+
+                    // Mux mic audio with video using FFmpegKit
+                    try {
+                        Log.d("RecordingDebug", "Starting FFmpeg muxing...")
+                        Log.d("RecordingDebug", "Video file: ${mediaStoreOutputFile.absolutePath} (exists: ${mediaStoreOutputFile.exists()}, size: ${mediaStoreOutputFile.length()} bytes)")
+                        Log.d("RecordingDebug", "Audio file: ${micOutputFile.absolutePath} (exists: ${micOutputFile.exists()}, size: ${micOutputFile.length()} bytes)")
+                        Log.d("RecordingDebug", "Output file: ${outputFile.absolutePath}")
+                        
+                        val ffmpegCommand = "-i ${mediaStoreOutputFile.absolutePath} -i ${micOutputFile.absolutePath} -c:v copy -c:a aac -strict experimental ${outputFile.absolutePath}"
+                        FFmpegKit.executeAsync(ffmpegCommand) { session ->
+                            val returnCode = session.returnCode
+                            if (ReturnCode.isSuccess(returnCode)) {
+                                Log.d(TAG, "Muxing succeeded: ${outputFile.absolutePath}")
+                                // Auto-trim if enabled
+                                GlobalScope.launch(Dispatchers.IO) {
+                                    try {
+                                        val trimEnabled = settingsDataStore.autoTrimEnabled.first()
+                                        val trimStart = settingsDataStore.autoTrimStartSeconds.first()
+                                        val trimEnd = settingsDataStore.autoTrimEndSeconds.first()
+                                        if (trimEnabled && (trimStart > 0 || trimEnd > 0)) {
+                                            val duration = getVideoDurationSec(outputFile.absolutePath)
+                                            val trimTo = (duration - trimEnd).coerceAtLeast(trimStart + 1)
+                                            val trimmedFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_trimmed.mp4")
+                                            val trimCmd = "-i ${outputFile.absolutePath} -ss $trimStart -to $trimTo -c copy ${trimmedFile.absolutePath}"
+                                            val trimSession = FFmpegKit.execute(trimCmd)
+                                            if (ReturnCode.isSuccess(trimSession.returnCode) && trimmedFile.exists()) {
+                                                outputFile.delete()
+                                                trimmedFile.renameTo(outputFile)
+                                                Log.d(TAG, "Auto-trimmed video: ${outputFile.absolutePath}")
+                                                // Regenerate thumbnail for trimmed file
+                                                try {
+                                                    val retriever = MediaMetadataRetriever()
+                                                    retriever.setDataSource(outputFile.absolutePath)
+                                                    val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                                                    if (frame != null) {
+                                                        val thumbFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_thumbnail.png")
+                                                        FileOutputStream(thumbFile).use { out ->
+                                                            frame.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                                        }
+                                                        Log.d(TAG, "Thumbnail updated: ${thumbFile.absolutePath}")
+                                                    }
+                                                    retriever.release()
+                                                } catch (e: Exception) {
+                                                    Log.e(TAG, "Thumbnail update failed: ${e.message}")
+                                                }
+                                            } else {
+                                                Log.e(TAG, "Auto-trim failed, using untrimmed file.")
+                                                CoroutineScope(Dispatchers.IO).launch {
+                                                    logCrashlyticsIfEnabled("Auto-trim failed", null, this@ScreenRecorderService)
+                                                }
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "Auto-trim error: ${e.message}")
+                                        CoroutineScope(Dispatchers.IO).launch {
+                                            logCrashlyticsIfEnabled("Auto-trim error: ${e.message}", e, this@ScreenRecorderService)
+                                        }
+                                    }
+                                }
+                                // Generate thumbnail after muxing
+                                GlobalScope.launch(Dispatchers.IO) {
+                                    try {
+                                        val retriever = MediaMetadataRetriever()
+                                        retriever.setDataSource(outputFile.absolutePath)
+                                        val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                                        val randomTime = if (durationMs > 0) (1000000L..(durationMs * 1000L - 1)).random() else 0L
+                                        val frame = retriever.getFrameAtTime(randomTime, MediaMetadataRetriever.OPTION_CLOSEST)
+                                        if (frame != null) {
+                                            val thumbFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_thumbnail.png")
+                                            FileOutputStream(thumbFile).use { out ->
+                                                frame.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                            }
+                                            Log.d(TAG, "Thumbnail generated (random frame): ${thumbFile.absolutePath}")
+                                        }
+                                        retriever.release()
+                                    } catch (e: Exception) {
+                                        Log.e(TAG, "Thumbnail generation failed: ${e.message}")
+                                        CoroutineScope(Dispatchers.IO).launch {
+                                            logCrashlyticsIfEnabled("Thumbnail generation failed: ${e.message}", e, this@ScreenRecorderService)
+                                        }
+                                    }
+                                }
+                                // After muxing, save highlight timestamps if any
+                                if (autoHighlightDetection && highlightTimestamps.isNotEmpty()) {
+                                    val highlightFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_highlights.json")
+                                    val json = JSONArray(highlightTimestamps)
+                                    highlightFile.writeText(json.toString())
+                                    
+                                    // Trigger highlight clip extraction if enabled
+                                    GlobalScope.launch(Dispatchers.Main) {
+                                        val clipExtractionEnabled = settingsDataStore.autoHighlightClipExtraction.first()
+                                        val clipLength = settingsDataStore.highlightClipLength.first()
+                                        if (clipExtractionEnabled) {
+                                            val data = workDataOf(
+                                                "video_path" to outputFile.absolutePath,
+                                                "highlight_timestamps" to json.toString(),
+                                                "clip_length" to clipLength
+                                            )
+                                            val request = OneTimeWorkRequestBuilder<HighlightClipExtractionWorker>()
+                                                .setInputData(data)
+                                                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                                                .build()
+                                            WorkManager.getInstance(this@ScreenRecorderService).enqueue(request)
+                                            Log.d(TAG, "Highlight clip extraction queued for ${highlightTimestamps.size} highlights")
+                                        }
+                                    }
+                                }
+                                // Launch PlaybackActivity for preview
+                                val playbackIntent = Intent(this, PlaybackActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    putExtra("video_uri", outputFile.absolutePath)
+                                }
+                                startActivity(playbackIntent)
+
+                                // Cloud backup if enabled
+                                GlobalScope.launch(Dispatchers.Main) {
+                                    val backupEnabled = settingsDataStore.cloudBackupEnabled.first()
+                                    val provider = settingsDataStore.cloudBackupProvider.first()
+                                    if (backupEnabled) {
+                                        val data = workDataOf(
+                                            "video_path" to outputFile.absolutePath,
+                                            "thumbnail_path" to (outputFile.parent + "/" + outputFile.nameWithoutExtension + "_thumbnail.png"),
+                                            "provider" to provider
+                                        )
+                                        val request = OneTimeWorkRequestBuilder<CloudBackupWorker>()
+                                            .setInputData(data)
+                                            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                                            .build()
+                                        WorkManager.getInstance(this@ScreenRecorderService).enqueue(request)
+                                    }
+                                }
+                            } else {
+                                Log.e(TAG, "Muxing failed: ${session.failStackTrace}")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Muxing failed: ${e.message}")
+                    }
+                }
+            }
+        } else {
+            Log.e("RecordingDebug", "Failed to create MediaProjection")
+            return
+        }
 
         // Set up MediaCodec
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, screenWidth, screenHeight)
@@ -271,32 +483,48 @@ class ScreenRecorderService : Service() {
 
         mediaCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
         mediaCodec?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        Log.d("RecordingDebug", "MediaCodec configured successfully")
 
         // Set up MediaMuxer
         mediaMuxer = MediaMuxer(outputFile!!.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        Log.d("RecordingDebug", "MediaMuxer created successfully")
 
         // Set up VirtualDisplay
         val surface = mediaCodec?.createInputSurface()
+        if (surface == null) {
+            Log.e("RecordingDebug", "Failed to create input surface from MediaCodec")
+            return
+        }
+        Log.d("RecordingDebug", "Input surface created successfully")
+        
         virtualDisplay = mediaProjection?.createVirtualDisplay(
             "ScreenRecording",
             screenWidth, screenHeight, screenDensity,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             surface, null, null
         )
+        if (virtualDisplay != null) {
+            Log.d("RecordingDebug", "VirtualDisplay created successfully with dimensions: ${screenWidth}x${screenHeight}")
+        } else {
+            Log.e("RecordingDebug", "Failed to create VirtualDisplay")
+            return
+        }
 
         // Start recording
         mediaCodec?.start()
         isRecording = true
         startTime = System.currentTimeMillis()
         muxerStarted = false
+        Log.d("RecordingDebug", "Recording started successfully, isRecording: $isRecording")
 
-        // Show notification
-        startForeground(NOTIFICATION_ID, createNotification())
+        // Show notification (already started in onStartCommand)
+        Log.d("RecordingDebug", "Foreground service already started with notification")
 
         // Start encoding thread
         Thread {
             encodeVideo()
         }.start()
+        Log.d("RecordingDebug", "Encoding thread started")
 
         CoroutineScope(Dispatchers.IO).launch {
             analyticsManager.logRecordingStart()
@@ -305,56 +533,74 @@ class ScreenRecorderService : Service() {
 
     private fun encodeVideo() {
         val bufferInfo = MediaCodec.BufferInfo()
-        
+        var frameCount = 0
+        var lastLogTime = System.currentTimeMillis()
+        Log.d("RecordingDebug", "Encoding thread started - waiting for video data...")
         while (isRecording) {
             if (isPaused) {
                 Thread.sleep(100)
                 continue
             }
             val outputBufferId = mediaCodec?.dequeueOutputBuffer(bufferInfo, 10000)
-            
             when (outputBufferId) {
                 MediaCodec.INFO_TRY_AGAIN_LATER -> {
                     // No output available yet
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastLogTime > 5000) { // Log every 5 seconds
+                        Log.d("RecordingDebug", "Still waiting for video data... (frameCount: $frameCount)")
+                        lastLogTime = currentTime
+                    }
                 }
                 MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
-                    // Format changed, add track to muxer
+                    Log.d("RecordingDebug", "MediaCodec output format changed")
                     if (!muxerStarted) {
                         val format = mediaCodec?.outputFormat
                         if (format != null) {
                             videoTrackIndex = mediaMuxer?.addTrack(format) ?: -1
                             mediaMuxer?.start()
                             muxerStarted = true
+                            Log.d("RecordingDebug", "MediaMuxer started successfully, videoTrackIndex: $videoTrackIndex")
+                        } else {
+                            Log.e("RecordingDebug", "MediaCodec output format is null")
                         }
                     }
-                }
-                MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> {
-                    // Ignore
                 }
                 else -> {
                     if (outputBufferId != null && outputBufferId >= 0) {
                         val outputBuffer = mediaCodec?.getOutputBuffer(outputBufferId)
                         if (outputBuffer != null && muxerStarted) {
                             mediaMuxer?.writeSampleData(videoTrackIndex, outputBuffer, bufferInfo)
+                            frameCount++
+                            Log.d("RecordingDebug", "Wrote frame $frameCount, size: ${bufferInfo.size}")
+                        } else {
+                            if (!muxerStarted) {
+                                Log.w("RecordingDebug", "Received video data but muxer not started yet")
+                            }
                         }
                         mediaCodec?.releaseOutputBuffer(outputBufferId, false)
+                    } else if (outputBufferId != null) {
+                        Log.e("RecordingDebug", "Invalid output buffer ID: $outputBufferId")
                     }
                 }
             }
         }
+        Log.d("RecordingDebug", "Encoding thread finished, total frames processed: $frameCount")
     }
 
     private fun stopRecording() {
-        if (!isRecording) return
+        if (!isRecording) {
+            Log.d(TAG, "stopRecording called but recording was not active")
+            return
+        }
 
+        Log.d(TAG, "Stopping recording")
         vibrateStop()
 
         autoStopJob?.cancel()
         autoStopJob = null
 
         // Hide recording indicator overlay
-        recordingOverlay?.hide()
-        recordingOverlay = null
+        // REMOVE: All references to RecordingOverlay, recordingOverlay variable, and overlay logic
 
         isRecording = false
         isPaused = false
@@ -376,12 +622,32 @@ class ScreenRecorderService : Service() {
         mediaCodec?.stop()
         mediaCodec?.release()
         virtualDisplay?.release()
+        
+        // Unregister MediaProjection callback with null checks
+        try {
+            mediaProjectionCallback?.let { callback ->
+                    mediaProjection?.unregisterCallback(callback)
+                    Log.d(TAG, "MediaProjection callback unregistered successfully")
+            }
+            mediaProjectionCallback = null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering MediaProjection callback: ${e.message}")
+            CoroutineScope(Dispatchers.IO).launch {
+                logCrashlyticsIfEnabled("MediaProjection callback unregistration failed: ${e.message}", e, this@ScreenRecorderService)
+            }
+        }
+        
+        // Stop MediaProjection
         mediaProjection?.stop()
 
         // Stop muxer
         if (muxerStarted) {
+            Log.d("RecordingDebug", "Stopping MediaMuxer")
             mediaMuxer?.stop()
             mediaMuxer?.release()
+            Log.d("RecordingDebug", "MediaMuxer stopped and released")
+        } else {
+            Log.w("RecordingDebug", "MediaMuxer was not started, skipping stop")
         }
 
         // Mux mic audio with video using FFmpegKit
@@ -389,6 +655,12 @@ class ScreenRecorderService : Service() {
             val videoFile = File(getExternalFilesDir(null), recordingFileName ?: "CatRec_unknown.mp4")
             val finalFileName = recordingFileName?.replace(".mp4", "_with_audio.mp4") ?: "CatRec_unknown_with_audio.mp4"
             val outputFile = File(getExternalFilesDir(null), finalFileName)
+            
+            Log.d("RecordingDebug", "Starting FFmpeg muxing...")
+            Log.d("RecordingDebug", "Video file: ${videoFile.absolutePath} (exists: ${videoFile.exists()}, size: ${videoFile.length()} bytes)")
+            Log.d("RecordingDebug", "Audio file: ${micOutputFile.absolutePath} (exists: ${micOutputFile.exists()}, size: ${micOutputFile.length()} bytes)")
+            Log.d("RecordingDebug", "Output file: ${outputFile.absolutePath}")
+            
             val ffmpegCommand = "-i ${videoFile.absolutePath} -i ${micOutputFile.absolutePath} -c:v copy -c:a aac -strict experimental ${outputFile.absolutePath}"
             FFmpegKit.executeAsync(ffmpegCommand) { session ->
                 val returnCode = session.returnCode
@@ -445,13 +717,15 @@ class ScreenRecorderService : Service() {
                         try {
                             val retriever = MediaMetadataRetriever()
                             retriever.setDataSource(outputFile.absolutePath)
-                            val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                            val randomTime = if (durationMs > 0) (1000000L..(durationMs * 1000L - 1)).random() else 0L
+                            val frame = retriever.getFrameAtTime(randomTime, MediaMetadataRetriever.OPTION_CLOSEST)
                             if (frame != null) {
                                 val thumbFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_thumbnail.png")
                                 FileOutputStream(thumbFile).use { out ->
                                     frame.compress(Bitmap.CompressFormat.PNG, 100, out)
                                 }
-                                Log.d(TAG, "Thumbnail generated: ${thumbFile.absolutePath}")
+                                Log.d(TAG, "Thumbnail generated (random frame): ${thumbFile.absolutePath}")
                             }
                             retriever.release()
                         } catch (e: Exception) {
@@ -519,23 +793,31 @@ class ScreenRecorderService : Service() {
         }
 
         // Hide overlay
-        recordingOverlay?.hide()
+        // REMOVE: All references to RecordingOverlay, recordingOverlay variable, and overlay logic
 
         // Stop foreground service
-        stopForeground(true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
 
         // Scan file for gallery
         outputFile?.let { file ->
             if (file.exists()) {
-                // Use MediaScanner to make the file visible in gallery
-                val intent = Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE)
-                intent.data = android.net.Uri.fromFile(file)
-                sendBroadcast(intent)
+                // Use MediaScannerConnection to make the file visible in gallery
+                MediaScannerConnection.scanFile(
+                    this,
+                    arrayOf(file.absolutePath),
+                    null,
+                    null
+                )
             }
         }
 
         // Send broadcast that recording stopped
-        val broadcastIntent = Intent(ACTION_RECORDING_STOPPED).apply { setPackage(packageName) }
+        val broadcastIntent = Intent(ACTION_RECORDING_STOPPED).apply { setPackage(packageName ?: "") }
         sendBroadcast(broadcastIntent)
 
         // Stop service
@@ -579,7 +861,7 @@ class ScreenRecorderService : Service() {
     private fun togglePauseResume() {
         if (!isRecording || !pauseEnabled) return
         isPaused = !isPaused
-        recordingOverlay?.setPaused(isPaused)
+        // REMOVE: All references to RecordingOverlay, recordingOverlay variable, and overlay logic
         if (isPaused) {
             pauseStartTime = System.currentTimeMillis()
             // Pause auto-stop timer
@@ -620,9 +902,15 @@ class ScreenRecorderService : Service() {
     private fun toggleMicMute() {
         if (!isRecording || !micMuteEnabled) return
         isMicMuted = !isMicMuted
-        recordingOverlay?.setMicMuted(isMicMuted)
+        // REMOVE: All references to RecordingOverlay, recordingOverlay variable, and overlay logic
         // MicRecorder should feed silence if muted
         micRecorder?.setMuted(isMicMuted)
+    }
+
+    private fun updateNoiseSuppression(enabled: Boolean) {
+        if (!isRecording) return
+        micRecorder?.setNoiseSuppression(enabled)
+        Log.d(TAG, "Noise suppression updated to: $enabled")
     }
 
     private fun startHighlightDetection() {
@@ -649,6 +937,16 @@ class ScreenRecorderService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        // Unregister MediaProjection callback if registered
+        try {
+            mediaProjectionCallback?.let { cb ->
+                mediaProjection?.unregisterCallback(cb)
+                Log.d(TAG, "MediaProjection callback unregistered in onDestroy")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering MediaProjection callback in onDestroy: ${e.message}")
+        }
+        mediaProjectionCallback = null
         unregisterReceiver(stopRecordingReceiver)
         unregisterReceiver(controlReceiver)
         stopRecording()

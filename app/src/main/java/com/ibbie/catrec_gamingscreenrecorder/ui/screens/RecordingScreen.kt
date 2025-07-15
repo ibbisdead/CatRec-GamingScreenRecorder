@@ -7,6 +7,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -14,17 +17,54 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Square
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ibbie.catrec_gamingscreenrecorder.SettingsDataStore
+import com.ibbie.catrec_gamingscreenrecorder.viewmodel.SettingsViewModel
 import kotlinx.coroutines.delay
 import java.io.File
 import android.util.Log
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.vectorResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
+import kotlin.math.roundToInt
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import androidx.compose.ui.viewinterop.AndroidView
+import android.widget.VideoView
+import android.widget.MediaController
+import android.net.Uri
+import androidx.compose.material.icons.filled.Close
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.foundation.Image
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 
 @Composable
 fun RecordingScreen(
@@ -32,50 +72,45 @@ fun RecordingScreen(
     darkTheme: Boolean
 ) {
     val context = LocalContext.current
-    val settingsDataStore = remember { com.ibbie.catrec_gamingscreenrecorder.SettingsDataStore(context) }
-    val orientation by settingsDataStore.orientation.collectAsState(initial = "Auto")
+    val settingsDataStore = SettingsDataStore(context)
+    val viewModel: SettingsViewModel = viewModel(
+        factory = SettingsViewModel.Factory(settingsDataStore)
+    )
+    val settings by viewModel.settingsFlow.collectAsState()
     val recordings = remember { mutableStateListOf<File>() }
     val isRecording = remember { mutableStateOf(false) }
-    
+    var sortByNewest by remember { mutableStateOf(true) }
+    var selectedRecording by remember { mutableStateOf<File?>(null) }
+    var showSortDropdown by remember { mutableStateOf(false) }
+
     // Load recordings on first composition
     LaunchedEffect(Unit) {
-        loadRecordings(context, recordings)
+        loadRecordings(context, recordings, sortByNewest)
     }
-    
+    // Refresh recordings when sort changes
+    LaunchedEffect(sortByNewest) {
+        loadRecordings(context, recordings, sortByNewest)
+    }
     // Check service status periodically and refresh recordings list
     LaunchedEffect(Unit) {
-        // Clear any stale recording state on app start
         val prefs = context.getSharedPreferences("service_state", Context.MODE_PRIVATE)
         prefs.edit().putBoolean("is_recording", false).apply()
-        Log.d("RecordingScreen", "Cleared stale recording state on app start")
-        
         while (true) {
             val serviceRunning = isServiceRunning(context)
-            
-            // If service just stopped, refresh the recordings list
             if (isRecording.value && !serviceRunning) {
-                loadRecordings(context, recordings)
-                Log.d("RecordingScreen", "Recording stopped, refreshed recordings list")
+                loadRecordings(context, recordings, sortByNewest)
             }
-            
-            // Only log when state changes
-            if (isRecording.value != serviceRunning) {
-                Log.d("RecordingScreen", "Service state changed: $serviceRunning")
-            }
-            
             isRecording.value = serviceRunning
             delay(1000)
         }
     }
-    
-    // Auto-refresh recordings when recording state changes
     LaunchedEffect(isRecording.value) {
         if (!isRecording.value) {
-            delay(1000) // Wait a bit for file to be saved
-            loadRecordings(context, recordings)
+            delay(1000)
+            loadRecordings(context, recordings, sortByNewest)
         }
     }
-    
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -84,75 +119,86 @@ fun RecordingScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(bottom = 160.dp) // Make room for the record button
+                .padding(bottom = 160.dp)
         ) {
-            // Videos title and line
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Videos",
-                    style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                    color = if (darkTheme) Color.White else Color.Black
+                    text = "Screen Recorder",
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    color = if (darkTheme) Color.White else Color.Black,
+                    modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(1.dp)
-                        .background(if (darkTheme) Color.White else Color.Black)
-                )
-            }
-            
-            // Videos list
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(horizontal = 16.dp)
-            ) {
-                if (recordings.isEmpty()) {
-                    item {
-                        // Empty state - no content below "Videos"
+                Box {
+                    IconButton(onClick = { showSortDropdown = true }) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Sort,
+                            contentDescription = "Sort",
+                            tint = Color(0xFFD32F2F)
+                        )
                     }
-                } else {
-                    items(recordings) { file ->
-                        RecordingItem(
-                            file = file,
-                            darkTheme = darkTheme,
-                            onPlay = { playRecording(context, file) },
-                            onShare = { shareRecording(context, file) },
-                            onDelete = { 
-                                deleteRecording(context, file, recordings)
+                    DropdownMenu(
+                        expanded = showSortDropdown,
+                        onDismissRequest = { showSortDropdown = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Newest First") },
+                            onClick = {
+                                sortByNewest = true
+                                showSortDropdown = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Oldest First") },
+                            onClick = {
+                                sortByNewest = false
+                                showSortDropdown = false
                             }
                         )
                     }
                 }
             }
+            if (recordings.isEmpty()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No recordings found.", color = Color.Gray)
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(220.dp),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                    contentPadding = PaddingValues(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    items(recordings) { file ->
+                        RecordingThumbnail(
+                            file = file,
+                            darkTheme = darkTheme,
+                            onClick = { selectedRecording = file }
+                        )
+                    }
+                }
+            }
         }
-        
-        // Record button at bottom right
+        // Record button at bottom right (unchanged)
         Button(
             onClick = {
-                Log.d("RecordingScreen", "Record button clicked, isRecording: "+isRecording.value)
                 if (isRecording.value) {
-                    // Stop recording
-                    Log.d("RecordingScreen", "Stopping recording")
                     val stopIntent = Intent(context, com.ibbie.catrec_gamingscreenrecorder.ScreenRecorderService::class.java)
                     stopIntent.action = "com.ibbie.catrec.ACTION_STOP"
                     context.startService(stopIntent)
                 } else {
-                    // Start recording
-                    Log.d("RecordingScreen", "Starting recording")
-                    onStartRecording(true, true, orientation)
+                    onStartRecording(true, true, settings.orientation)
                 }
             },
             shape = CircleShape,
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)), // Red color
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
             modifier = Modifier
-                .size(140.dp) // Increased from 120dp
+                .size(140.dp)
                 .align(Alignment.BottomEnd)
                 .padding(32.dp)
         ) {
@@ -160,7 +206,18 @@ fun RecordingScreen(
                 imageVector = if (isRecording.value) Icons.Default.Square else Icons.Default.PlayArrow,
                 contentDescription = if (isRecording.value) "Stop Recording" else "Start Recording",
                 tint = Color.White,
-                modifier = Modifier.size(96.dp) // Increased from 80dp
+                modifier = Modifier.size(96.dp)
+            )
+        }
+        if (selectedRecording != null) {
+            VideoPlayerOverlay(
+                file = selectedRecording!!,
+                onClose = { selectedRecording = null },
+                onShare = { shareRecording(context, selectedRecording!!) },
+                onDelete = {
+                    deleteRecording(context, selectedRecording!!, recordings)
+                    selectedRecording = null
+                }
             )
         }
     }
@@ -284,16 +341,12 @@ fun RecordingItem(
 }
 
 // Helper functions (same as before)
-private fun loadRecordings(context: Context, recordings: MutableList<File>) {
-    val dir = File(context.getExternalFilesDir(null), "Recordings")
-    if (dir.exists()) {
-        val files = dir.listFiles { file -> 
-            file.isFile && file.extension == "mp4" && file.name.contains("_final")
-        }?.sortedByDescending { it.lastModified() } ?: emptyList()
-        
-        recordings.clear()
-        recordings.addAll(files)
-    }
+private fun loadRecordings(context: Context, recordings: MutableList<File>, sortByNewest: Boolean) {
+    val dir = context.getExternalFilesDir(null)
+    val files = dir?.listFiles()?.filter { it.name.endsWith("_with_audio.mp4") } ?: emptyList()
+    val sorted = if (sortByNewest) files.sortedByDescending { it.lastModified() } else files.sortedBy { it.lastModified() }
+    recordings.clear()
+    recordings.addAll(sorted)
 }
 
 private fun isServiceRunning(context: Context): Boolean {
@@ -358,5 +411,200 @@ private fun shareRecording(context: Context, file: File) {
 private fun deleteRecording(context: Context, file: File, recordings: MutableList<File>) {
     if (file.delete()) {
         recordings.remove(file)
+    }
+} 
+
+@Composable
+fun RecordingThumbnail(
+    file: File,
+    darkTheme: Boolean,
+    onClick: () -> Unit
+) {
+    val thumbFile = remember(file) {
+        File(file.parent, file.nameWithoutExtension + "_thumbnail.png")
+    }
+    val thumbBitmap = remember(thumbFile) {
+        if (thumbFile.exists()) {
+            try {
+                BitmapFactory.decodeFile(thumbFile.absolutePath)?.asImageBitmap()
+            } catch (_: Exception) { null }
+        } else null
+    }
+    Box(
+        modifier = Modifier
+            .aspectRatio(16f / 9f)
+            .clip(MaterialTheme.shapes.medium)
+            .background(Color.DarkGray)
+            .clickable { onClick() }
+    ) {
+        if (thumbBitmap != null) {
+            Image(
+                bitmap = thumbBitmap,
+                contentDescription = "Recording thumbnail",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Play",
+                    tint = Color.White,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+        }
+        // Overlay info (resolution, size, duration, timestamp)
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(8.dp)
+        ) {
+            Text(
+                text = "Recording at " + SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(file.lastModified())),
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = readableFileSize(file.length()),
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                // TODO: Show duration and resolution if available
+            }
+        }
+        // Play button overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = "Play",
+                tint = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.size(48.dp)
+            )
+        }
+    }
+}
+
+fun readableFileSize(size: Long): String {
+    if (size <= 0) return "0 B"
+    val units = arrayOf("B", "KB", "MB", "GB", "TB")
+    val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
+    return String.format("%.2f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
+} 
+
+@Composable
+fun VideoPlayerOverlay(
+    file: File,
+    onClose: () -> Unit,
+    onShare: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val context = LocalContext.current
+    var isPlaying by remember { mutableStateOf(true) }
+    var videoPosition by remember { mutableStateOf(0) }
+    var videoDuration by remember { mutableStateOf(0) }
+    var videoView: VideoView? by remember { mutableStateOf(null) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.95f))
+            .zIndex(10f)
+    ) {
+        // Video
+        AndroidView(
+            factory = { ctx ->
+                VideoView(ctx).apply {
+                    setVideoURI(Uri.fromFile(file))
+                    setOnPreparedListener { mp ->
+                        videoDuration = mp.duration
+                        start()
+                        isPlaying = true
+                    }
+                    setOnCompletionListener {
+                        isPlaying = false
+                    }
+                    setOnClickListener {
+                        if (isPlaying) pause() else start()
+                        isPlaying = !isPlaying
+                    }
+                    videoView = this
+                }
+            },
+            update = { view ->
+                if (isPlaying) view.start() else view.pause()
+                view.seekTo(videoPosition)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .align(Alignment.Center)
+        )
+        // Center play/pause button
+        IconButton(
+            onClick = {
+                videoView?.let {
+                    if (isPlaying) it.pause() else it.start()
+                    isPlaying = !isPlaying
+                }
+            },
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                tint = Color.White,
+                modifier = Modifier.size(64.dp)
+            )
+        }
+        // Seek bar
+        Slider(
+            value = videoPosition.toFloat(),
+            onValueChange = {
+                videoPosition = it.toInt()
+                videoView?.seekTo(videoPosition)
+            },
+            valueRange = 0f..(videoDuration.toFloat().coerceAtLeast(1f)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 32.dp, vertical = 48.dp),
+            colors = SliderDefaults.colors(
+                thumbColor = Color(0xFFD32F2F),
+                activeTrackColor = Color(0xFFD32F2F)
+            )
+        )
+        // Top bar with close, share, delete
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .padding(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+            }
+            Row {
+                IconButton(onClick = onShare) {
+                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                }
+            }
+        }
     }
 } 

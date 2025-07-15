@@ -1,6 +1,7 @@
 package com.ibbie.catrec_gamingscreenrecorder
 
 import android.app.Activity
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
@@ -18,6 +19,9 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.IntentSenderRequest
+import androidx.core.content.pm.PackageInfoCompat
 
 class UpdateManager(private val context: Context) {
     
@@ -26,15 +30,20 @@ class UpdateManager(private val context: Context) {
     
     companion object {
         private const val TAG = "UpdateManager"
-        private const val UPDATE_REQUEST_CODE = 500
+        const val UPDATE_REQUEST_CODE = 500
     }
     
     /**
      * Check for app updates and show update dialog if available
      * @param activity The activity to show the update dialog from
      * @param forceCheck Whether to force check for updates (ignoring network/analytics settings)
+     * @param updateLauncher The ActivityResultLauncher to handle update results
      */
-    suspend fun checkForUpdates(activity: Activity, forceCheck: Boolean = false) {
+    suspend fun checkForUpdates(
+        activity: Activity, 
+        forceCheck: Boolean = false,
+        updateLauncher: ActivityResultLauncher<IntentSenderRequest>? = null
+    ) {
         try {
             // Check if auto update check is enabled, analytics is enabled, and network is available
             if (!forceCheck) {
@@ -74,7 +83,7 @@ class UpdateManager(private val context: Context) {
                     val analyticsEnabled = SettingsDataStore(context).analyticsEnabled.first()
                     if (analyticsEnabled) {
                         val availableVersion = appUpdateInfo.availableVersionCode().toString()
-                        val currentVersion = context.packageManager.getPackageInfo(context.packageName, 0).versionCode.toString()
+                        val currentVersion = PackageInfoCompat.getLongVersionCode(context.packageManager.getPackageInfo(context.packageName, 0)).toString()
                         val params = mapOf<String, String>(
                             "available_version" to availableVersion,
                             "current_version" to currentVersion
@@ -83,8 +92,8 @@ class UpdateManager(private val context: Context) {
                     }
                 }
                 
-                // Show update dialog
-                showUpdateDialog(activity, appUpdateInfo)
+                // Show update dialog using modern Activity Result API
+                showUpdateDialog(activity, appUpdateInfo, updateLauncher)
                 
             } else {
                 Log.d(TAG, "No update available or update type not allowed")
@@ -107,20 +116,61 @@ class UpdateManager(private val context: Context) {
     }
     
     /**
-     * Show update dialog to user
+     * Show update dialog to user using modern Activity Result API
      */
-    private fun showUpdateDialog(activity: Activity, appUpdateInfo: AppUpdateInfo) {
+    private fun showUpdateDialog(
+        activity: Activity, 
+        appUpdateInfo: AppUpdateInfo,
+        updateLauncher: ActivityResultLauncher<IntentSenderRequest>?
+    ) {
         val updateOptions = AppUpdateOptions.newBuilder(AppUpdateType.FLEXIBLE)
             .setAllowAssetPackDeletion(true)
             .build()
         
         try {
-            appUpdateManager.startUpdateFlowForResult(
-                appUpdateInfo,
-                activity,
-                updateOptions,
-                UPDATE_REQUEST_CODE
-            )
+            if (updateLauncher != null) {
+                // Use modern Activity Result API
+                try {
+                    // Create a PendingIntent for the update flow
+                    val intent = Intent(activity, activity::class.java).apply {
+                        action = "UPDATE_ACTION"
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    val pendingIntent = PendingIntent.getActivity(
+                        activity,
+                        0,
+                        intent,
+                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    val intentSenderRequest = IntentSenderRequest.Builder(pendingIntent).build()
+                    updateLauncher.launch(intentSenderRequest)
+                    
+                    // Start the actual update flow
+                    appUpdateManager.startUpdateFlowForResult(
+                        appUpdateInfo,
+                        activity,
+                        updateOptions,
+                        UPDATE_REQUEST_CODE
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error creating IntentSenderRequest", e)
+                    // Fallback to deprecated method
+                    appUpdateManager.startUpdateFlowForResult(
+                        appUpdateInfo,
+                        activity,
+                        updateOptions,
+                        UPDATE_REQUEST_CODE
+                    )
+                }
+            } else {
+                // Fallback to deprecated method if launcher not provided
+                appUpdateManager.startUpdateFlowForResult(
+                    appUpdateInfo,
+                    activity,
+                    updateOptions,
+                    UPDATE_REQUEST_CODE
+                )
+            }
         } catch (e: IntentSender.SendIntentException) {
             Log.e(TAG, "Error starting update flow", e)
         }

@@ -31,7 +31,7 @@ class StopConfirmationDialog(private val context: Context) {
         val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         } else {
-            WindowManager.LayoutParams.TYPE_PHONE
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
         }
 
         val params = WindowManager.LayoutParams(

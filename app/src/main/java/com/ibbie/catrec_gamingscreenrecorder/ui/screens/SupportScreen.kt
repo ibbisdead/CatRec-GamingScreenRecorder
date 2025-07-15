@@ -30,6 +30,9 @@ import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.AdListener
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ibbie.catrec_gamingscreenrecorder.AnalyticsManager
+import com.ibbie.catrec_gamingscreenrecorder.AdManager
+import android.app.Activity
+import android.widget.Toast
 import kotlinx.coroutines.launch
 
 @Composable
@@ -37,8 +40,7 @@ fun SupportScreen(
     darkTheme: Boolean,
     onStartRecording: (Boolean, Boolean) -> Unit
 ) {
-    val showBannerAd = remember { mutableStateOf(false) }
-    val adView = remember { mutableStateOf<AdView?>(null) }
+
     val context = LocalContext.current
     val isRecording = remember { mutableStateOf(false) }
     val analyticsManager = remember { AnalyticsManager(context) }
@@ -68,7 +70,7 @@ fun SupportScreen(
             
             // App icon
             Image(
-                painter = painterResource(id = R.drawable.catrec_icon),
+                painter = painterResource(id = R.drawable.ic_launcher_foreground), // <-- update to new logo asset
                 contentDescription = "CatRec Icon",
                 modifier = Modifier.size(120.dp)
             )
@@ -90,52 +92,47 @@ fun SupportScreen(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 // Watch an ad to support me
+                var adLoading by remember { mutableStateOf(false) }
                 Button(
                     onClick = {
-                        if (!showBannerAd.value) {
-                            // Initialize MobileAds only once
-                            MobileAds.initialize(context)
-                            showBannerAd.value = true
-                        } else {
-                            showBannerAd.value = false
-                        }
+                        adLoading = true
+                        AdManager.loadRewardedAd(
+                            context = context,
+                            onLoaded = {
+                                adLoading = false
+                                AdManager.showRewardedAd(
+                                    activity = context as Activity,
+                                    onReward = {
+                                        Toast.makeText(context, "Reward earned!", Toast.LENGTH_SHORT).show()
+                                    },
+                                    onClosed = {},
+                                    onFailed = {
+                                        Toast.makeText(context, "Ad failed to show", Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            },
+                            onFailed = {
+                                adLoading = false
+                                Toast.makeText(context, "Failed to load ad: $it", Toast.LENGTH_SHORT).show()
+                            }
+                        )
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F)),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !adLoading
                 ) {
-                    Text(
-                        if (!showBannerAd.value) "Watch an ad to support me" else "Hide ad",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                // Banner Ad Container
-                if (showBannerAd.value) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    AndroidView(
-                        factory = { ctx ->
-                            AdView(ctx).apply {
-                                setAdSize(AdSize.BANNER)
-                                adUnitId = "ca-app-pub-7741372232895726/3753282793"
-                                adListener = object : AdListener() {
-                                    override fun onAdLoaded() {
-                                        Log.d("AdMob", "Banner ad loaded successfully.")
-                                    }
-                                    override fun onAdFailedToLoad(adError: LoadAdError) {
-                                        Log.e("AdMob", "Banner ad failed to load: ${adError.message}")
-                                    }
-                                }
-                                loadAd(AdRequest.Builder().build())
-                                adView.value = this
-                            }
-                        },
-                        update = { view ->
-                            // Reload ad if needed
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp)
-                    )
+                    if (adLoading) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    } else {
+                        Text(
+                            "Watch an ad to support me",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
                 
                 // Share this app
@@ -168,24 +165,6 @@ fun SupportScreen(
                 ) {
                     Text(
                         "Subscribe to my YouTube channel",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-                
-                // Test Crash Reporting (Developer only)
-                Button(
-                    onClick = {
-                        scope.launch {
-                            analyticsManager.logEvent("test_crash_triggered")
-                            analyticsManager.testCrash()
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF666666)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        "Test Crash Reporting",
                         color = Color.White,
                         fontWeight = FontWeight.Bold
                     )

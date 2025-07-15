@@ -12,6 +12,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import com.ibbie.catrec_gamingscreenrecorder.model.Settings
 
 val Context.settingsDataStore by preferencesDataStore(name = "settings")
 
@@ -24,10 +26,7 @@ object SettingsKeys {
     val FPS = intPreferencesKey("fps")
     val MIC_VOLUME = intPreferencesKey("mic_volume")
     val NOISE_SUPPRESSION = booleanPreferencesKey("noise_suppression")
-    val RECORDING_OVERLAY = booleanPreferencesKey("recording_overlay")
     val PAUSE_ON_SCREEN_OFF = booleanPreferencesKey("pause_on_screen_off")
-    val OVERLAY_ENABLED = booleanPreferencesKey("overlay_enabled")
-    val OVERLAY_BUTTON = booleanPreferencesKey("overlay_button")
     val PAUSE_ENABLED = booleanPreferencesKey("pause_enabled")
     val MIC_MUTE_ENABLED = booleanPreferencesKey("mic_mute_enabled")
 
@@ -68,17 +67,13 @@ class SettingsDataStore(internal val context: Context) {
     val audioChannel: Flow<String> = context.settingsDataStore.data.map { it[SettingsKeys.AUDIO_CHANNEL] ?: "Stereo" }
     val fps: Flow<Int> = context.settingsDataStore.data.map { it[SettingsKeys.FPS] ?: 60 }
     val micVolume: Flow<Int> = context.settingsDataStore.data.map { it[SettingsKeys.MIC_VOLUME] ?: 100 }
-    val noiseSuppression: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.NOISE_SUPPRESSION] ?: false }
-    val recordingOverlay: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.RECORDING_OVERLAY] ?: true }
+    val noiseSuppression: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.NOISE_SUPPRESSION] ?: true }
     val pauseOnScreenOff: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.PAUSE_ON_SCREEN_OFF] ?: false }
-    val overlayEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.OVERLAY_ENABLED] ?: false }
-    val overlayButton: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.OVERLAY_BUTTON] ?: true }
     val pauseEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.PAUSE_ENABLED] ?: false }
     val micMuteEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.MIC_MUTE_ENABLED] ?: false }
     val analyticsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.ANALYTICS_ENABLED] ?: false }
     val autoUpdateCheckEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.AUTO_UPDATE_CHECK_ENABLED] ?: true }
     val crashReportingEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.CRASH_REPORTING_ENABLED] ?: false }
-
     val audioSource: Flow<String> = context.settingsDataStore.data.map { it[SettingsKeys.AUDIO_SOURCE] ?: "System Audio" }
     val orientation: Flow<String> = context.settingsDataStore.data.map { it[SettingsKeys.ORIENTATION] ?: "Auto" }
     val fileDestination: Flow<String> = context.settingsDataStore.data.map { it[SettingsKeys.FILE_DESTINATION] ?: "/storage/emulated/0/Movies/CatRec" }
@@ -104,16 +99,58 @@ class SettingsDataStore(internal val context: Context) {
     val autoDeleteEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.AUTO_DELETE_ENABLED] ?: false }
     val retentionDays: Flow<Int> = context.settingsDataStore.data.map { it[SettingsKeys.RETENTION_DAYS] ?: 30 }
 
+    // Combined settings flow for ViewModel
+    val settingsFlow: Flow<Settings> = context.settingsDataStore.data.map { preferences ->
+        Settings(
+            videoBitrate = preferences[SettingsKeys.VIDEO_BITRATE] ?: 8000000,
+            resolution = preferences[SettingsKeys.RESOLUTION] ?: "Native",
+            audioBitrate = preferences[SettingsKeys.AUDIO_BITRATE] ?: "128 kbps",
+            audioSampleRate = preferences[SettingsKeys.AUDIO_SAMPLE_RATE] ?: "44100 Hz",
+            audioChannel = preferences[SettingsKeys.AUDIO_CHANNEL] ?: "Stereo",
+            fps = preferences[SettingsKeys.FPS] ?: 60,
+            micVolume = preferences[SettingsKeys.MIC_VOLUME] ?: 100,
+            noiseSuppression = preferences[SettingsKeys.NOISE_SUPPRESSION] ?: true,
+            pauseOnScreenOff = preferences[SettingsKeys.PAUSE_ON_SCREEN_OFF] ?: false,
+            pauseEnabled = preferences[SettingsKeys.PAUSE_ENABLED] ?: false,
+            micMuteEnabled = preferences[SettingsKeys.MIC_MUTE_ENABLED] ?: false,
+            analyticsEnabled = preferences[SettingsKeys.ANALYTICS_ENABLED] ?: false,
+            autoUpdateCheckEnabled = preferences[SettingsKeys.AUTO_UPDATE_CHECK_ENABLED] ?: true,
+            crashReportingEnabled = preferences[SettingsKeys.CRASH_REPORTING_ENABLED] ?: false,
+            audioSource = preferences[SettingsKeys.AUDIO_SOURCE] ?: "System Audio",
+            orientation = preferences[SettingsKeys.ORIENTATION] ?: "Auto",
+            fileDestination = preferences[SettingsKeys.FILE_DESTINATION] ?: "/storage/emulated/0/Movies/CatRec",
+            showTouches = preferences[SettingsKeys.SHOW_TOUCHES] ?: false,
+            countdown = preferences[SettingsKeys.COUNTDOWN] ?: 0,
+            stopOptions = preferences[SettingsKeys.STOP_OPTIONS] ?: setOf("Screen Off"),
+            themeDark = preferences[SettingsKeys.THEME_DARK] ?: true,
+            isDarkTheme = preferences[SettingsKeys.THEME_DARK] ?: true,
+            autoStopMinutes = preferences[SettingsKeys.AUTO_STOP_MINUTES] ?: 0,
+            cloudBackupEnabled = preferences[SettingsKeys.CLOUD_BACKUP_ENABLED] ?: false,
+            cloudBackupProvider = preferences[SettingsKeys.CLOUD_BACKUP_PROVIDER] ?: "Google Drive",
+            autoTrimEnabled = preferences[SettingsKeys.AUTO_TRIM_ENABLED] ?: false,
+            autoTrimStartSeconds = preferences[SettingsKeys.AUTO_TRIM_START] ?: 0,
+            autoTrimEndSeconds = preferences[SettingsKeys.AUTO_TRIM_END] ?: 0,
+            gestureControlsEnabled = preferences[SettingsKeys.GESTURE_CONTROLS_ENABLED] ?: false,
+            scheduledRecordingEnabled = preferences[SettingsKeys.SCHEDULED_RECORDING_ENABLED] ?: false,
+            scheduledRecordingTime = preferences[SettingsKeys.SCHEDULED_RECORDING_TIME] ?: 0L,
+            scheduledRecurrence = preferences[SettingsKeys.SCHEDULED_RECURRENCE] ?: "None",
+            scheduledCustomDays = preferences[SettingsKeys.SCHEDULED_CUSTOM_DAYS] ?: setOf(),
+            autoHighlightDetection = preferences[SettingsKeys.AUTO_HIGHLIGHT_DETECTION] ?: false,
+            autoHighlightClipExtraction = preferences[SettingsKeys.AUTO_HIGHLIGHT_CLIP_EXTRACTION] ?: false,
+            highlightClipLength = preferences[SettingsKeys.HIGHLIGHT_CLIP_LENGTH] ?: 15,
+            autoHighlightReelGeneration = preferences[SettingsKeys.AUTO_HIGHLIGHT_REEL_GENERATION] ?: false,
+            autoDeleteEnabled = preferences[SettingsKeys.AUTO_DELETE_ENABLED] ?: false,
+            retentionDays = preferences[SettingsKeys.RETENTION_DAYS] ?: 30
+        )
+    }
+
     // All setter functions
     suspend fun setAutoHighlightDetection(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.AUTO_HIGHLIGHT_DETECTION] = value }
     suspend fun setAutoHighlightClipExtraction(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.AUTO_HIGHLIGHT_CLIP_EXTRACTION] = value }
     suspend fun setHighlightClipLength(value: Int) = context.settingsDataStore.edit { it[SettingsKeys.HIGHLIGHT_CLIP_LENGTH] = value }
     suspend fun setAutoHighlightReelGeneration(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.AUTO_HIGHLIGHT_REEL_GENERATION] = value }
     suspend fun setCountdown(value: Int) = context.settingsDataStore.edit { it[SettingsKeys.COUNTDOWN] = value }
-    suspend fun setOverlayEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.OVERLAY_ENABLED] = value }
-    suspend fun setAutoStopMinutes(value: Int) = context.settingsDataStore.edit { it[SettingsKeys.AUTO_STOP_MINUTES] = value }
     suspend fun setPauseOnScreenOff(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.PAUSE_ON_SCREEN_OFF] = value }
-    suspend fun setStopOptions(value: Set<String>) = context.settingsDataStore.edit { it[SettingsKeys.STOP_OPTIONS] = value }
     suspend fun setPauseEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.PAUSE_ENABLED] = value }
     suspend fun setMicMuteEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.MIC_MUTE_ENABLED] = value }
     suspend fun setGestureControlsEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.GESTURE_CONTROLS_ENABLED] = value }

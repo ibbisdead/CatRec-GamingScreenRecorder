@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "123456789",
-    "project_id": "catrec-gaming-screen-recorder",
-    "storage_bucket": "catrec-gaming-screen-recorder.appspot.com"
+    "project_number": "213506211308",
+    "project_id": "catrec-3028f",
+    "storage_bucket": "catrec-3028f.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:123456789:android:abcdef123456",
+        "mobilesdk_app_id": "1:213506211308:android:7656a07fd3087afe50d4c9",
         "android_client_info": {
           "package_name": "com.ibbie.catrec_gamingscreenrecorder"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "placeholder-api-key"
+          "current_key": "AIzaSyCQFoom-9f3nafFY0ydbmO-6pVULfZl2rI"
         }
       ],
       "services": {
@@ -26,4 +26,4 @@
     }
   ],
   "configuration_version": "1"
-} 
+}

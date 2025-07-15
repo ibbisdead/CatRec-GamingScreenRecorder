@@ -16,9 +16,6 @@
     <!-- Optional for notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
-    <!-- Required for overlay window -->
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    
     <!-- Required for network connectivity checks -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.INTERNET" />
@@ -48,9 +45,9 @@
         <!-- Screen recording service -->
         <service
             android:name=".ScreenRecorderService"
+            android:foregroundServiceType="mediaProjection|microphone"
             android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:exported="false" />
 
         <!-- Stop recording broadcast receiver -->
         <receiver
@@ -70,11 +67,7 @@
             </intent-filter>
         </activity>
 
-        <!-- Microphone test activity -->
-        <activity
-            android:name=".MicTestActivity"
-            android:exported="false"
-            android:theme="@style/Theme.CatRecGamingScreenRecorder" />
+
 
         <!-- Playback Activity for post-recording preview -->
         <activity
