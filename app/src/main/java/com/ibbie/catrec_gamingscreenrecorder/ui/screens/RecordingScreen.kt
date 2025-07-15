@@ -11,12 +11,18 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Square
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -184,7 +190,53 @@ fun RecordingScreen(
                 }
             }
         }
-        // Record button at bottom right (unchanged)
+        // Audio source indicator with settings shortcut
+        Card(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(start = 32.dp, end = 32.dp, bottom = 180.dp)
+                .clickable {
+                    // Open audio source settings - this could navigate to settings screen
+                    // For now, we'll just show a toast
+                    android.widget.Toast.makeText(
+                        context,
+                        "Change audio source in Settings",
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                },
+            colors = CardDefaults.cardColors(
+                containerColor = Color(0xCC000000)
+            ),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = when (settings.audioSource) {
+                        "Mic" -> Icons.Default.Mic
+                        "System Audio" -> Icons.Default.VolumeUp
+                        "System Audio + Mic" -> Icons.Default.RecordVoiceOver
+                        else -> Icons.Default.VolumeUp
+                    },
+                    contentDescription = null,
+                    tint = Color(0xFFD32F2F),
+                    modifier = Modifier
+                        .size(16.dp)
+                        .padding(end = 4.dp)
+                )
+                Text(
+                    text = settings.audioSource,
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+        
+        // Record button at bottom right
         Button(
             onClick = {
                 if (isRecording.value) {
@@ -192,7 +244,20 @@ fun RecordingScreen(
                     stopIntent.action = "com.ibbie.catrec.ACTION_STOP"
                     context.startService(stopIntent)
                 } else {
-                    onStartRecording(true, true, settings.orientation)
+                    // Use audio source setting to determine what to record
+                    val recordMic = when (settings.audioSource) {
+                        "Mic" -> true
+                        "System Audio" -> false
+                        "System Audio + Mic" -> true
+                        else -> false
+                    }
+                    val recordInternal = when (settings.audioSource) {
+                        "Mic" -> false
+                        "System Audio" -> true
+                        "System Audio + Mic" -> true
+                        else -> true
+                    }
+                    onStartRecording(recordMic, recordInternal, settings.orientation)
                 }
             },
             shape = CircleShape,
@@ -343,7 +408,11 @@ fun RecordingItem(
 // Helper functions (same as before)
 private fun loadRecordings(context: Context, recordings: MutableList<File>, sortByNewest: Boolean) {
     val dir = context.getExternalFilesDir(null)
-    val files = dir?.listFiles()?.filter { it.name.endsWith("_with_audio.mp4") } ?: emptyList()
+    val files = dir?.listFiles()?.filter { 
+        it.name.endsWith("_final.mp4") || 
+        it.name.endsWith("_with_audio.mp4") || 
+        it.name.endsWith("_video_only.mp4") 
+    } ?: emptyList()
     val sorted = if (sortByNewest) files.sortedByDescending { it.lastModified() } else files.sortedBy { it.lastModified() }
     recordings.clear()
     recordings.addAll(sorted)
