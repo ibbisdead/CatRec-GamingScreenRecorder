@@ -50,6 +50,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "11"
+        freeCompilerArgs += listOf(
+            "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api"
+        )
     }
     buildFeatures {
         compose = true
@@ -112,4 +115,5 @@ dependencies {
     implementation("com.google.android.play:app-update-ktx:2.1.0")
     implementation("androidx.compose.material3:material3:1.2.1")
     implementation(platform("androidx.compose:compose-bom:2024.01.00"))
+    implementation("com.google.accompanist:accompanist-swiperefresh:0.33.2-alpha")
 }

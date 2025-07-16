@@ -26,26 +26,33 @@ import java.io.File
 import android.graphics.BitmapFactory
 import java.text.SimpleDateFormat
 import java.util.*
+import android.util.Log
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material.icons.filled.PlayArrow
+import android.media.MediaMetadataRetriever
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.graphics.Bitmap
+import java.io.FileInputStream
+import java.io.InputStream
+import java.io.OutputStream
+import java.io.FileOutputStream
+import java.io.ByteArrayOutputStream
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GalleryScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    val recordingsDir = context.getExternalFilesDir(null)
-    var galleryItems by remember { mutableStateOf(listOf<GalleryItem>()) }
-
+    val recordings = remember { mutableStateListOf<GalleryItem>() }
+    val sortByNewest = remember { mutableStateOf(true) }
+    
     LaunchedEffect(Unit) {
-        val files = recordingsDir?.listFiles()?.filter { it.name.endsWith("_with_audio.mp4") }?.sortedByDescending { it.lastModified() } ?: emptyList()
-        val items = files.map { videoFile ->
-            val thumbFile = File(videoFile.parent, videoFile.nameWithoutExtension + "_thumbnail.png")
-            GalleryItem(
-                videoFile = videoFile,
-                thumbnailFile = thumbFile.takeIf { it.exists() },
-                date = Date(videoFile.lastModified()),
-                filename = videoFile.name
-            )
-        }
-        galleryItems = items
+        loadGalleryRecordings(context, recordings, sortByNewest.value)
     }
 
     Scaffold(
@@ -61,7 +68,7 @@ fun GalleryScreen(onBack: () -> Unit) {
         },
         containerColor = MaterialTheme.colorScheme.background
     ) { padding ->
-        if (galleryItems.isEmpty()) {
+        if (recordings.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text("No recordings found.", color = Color.Gray)
             }
@@ -73,10 +80,10 @@ fun GalleryScreen(onBack: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(galleryItems) { item ->
+                items(recordings) { item ->
                     GalleryThumbnail(item = item, onClick = {
                         val intent = Intent(context, PlaybackActivity::class.java).apply {
-                            putExtra("video_uri", item.videoFile.absolutePath)
+                            putExtra("video_uri", item.file.absolutePath)
                         }
                         context.startActivity(intent, null)
                     })
@@ -86,56 +93,148 @@ fun GalleryScreen(onBack: () -> Unit) {
     }
 }
 
+fun loadGalleryRecordings(context: Context, recordings: MutableList<GalleryItem>, sortByNewest: Boolean) {
+    GlobalScope.launch(Dispatchers.IO) {
+        try {
+            // Look in Movies/CatRec folder instead of app-specific storage
+            val moviesDir = File("/storage/emulated/0/Movies/CatRec")
+            if (!moviesDir.exists()) {
+                moviesDir.mkdirs()
+            }
+            
+            val videoFiles = moviesDir.listFiles { file ->
+                file.isFile && file.extension.lowercase() in listOf("mp4", "avi", "mov", "mkv")
+            }?.toList() ?: emptyList()
+            
+            val sortedFiles = if (sortByNewest) {
+                videoFiles.sortedByDescending { it.lastModified() }
+            } else {
+                videoFiles.sortedBy { it.lastModified() }
+            }
+            
+            val items = sortedFiles.map { videoFile ->
+                GalleryItem(
+                    file = videoFile,
+                    thumbnailFile = null // We'll generate thumbnails from video frames
+                )
+            }
+            
+            withContext(Dispatchers.Main) {
+                recordings.clear()
+                recordings.addAll(items)
+            }
+        } catch (e: Exception) {
+            Log.e("GalleryScreen", "Error loading recordings", e)
+        }
+    }
+}
+
 data class GalleryItem(
-    val videoFile: File,
-    val thumbnailFile: File?,
-    val date: Date,
-    val filename: String
+    val file: File,
+    val thumbnailFile: File?
 )
 
 @Composable
 fun GalleryThumbnail(item: GalleryItem, onClick: () -> Unit) {
-    val thumbBitmap = remember(item.thumbnailFile) {
-        item.thumbnailFile?.let {
+    val context = LocalContext.current
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    
+    LaunchedEffect(item.file) {
+        GlobalScope.launch(Dispatchers.IO) {
             try {
-                BitmapFactory.decodeFile(it.absolutePath)?.asImageBitmap()
-            } catch (_: Exception) { null }
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(item.file.absolutePath)
+                
+                // Get first frame instead of looking for thumbnail file
+                val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                if (frame != null) {
+                    withContext(Dispatchers.Main) {
+                        bitmap = frame
+                    }
+                }
+                retriever.release()
+            } catch (e: Exception) {
+                Log.e("GalleryThumbnail", "Error loading thumbnail", e)
+            }
         }
     }
-    val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()) }
-    Column(
+    
+    Box(
         modifier = Modifier
-            .width(128.dp)
+            .aspectRatio(16f / 9f)
+            .clip(MaterialTheme.shapes.medium)
+            .background(Color.DarkGray)
             .clickable { onClick() }
-            .background(MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium)
-            .padding(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (thumbBitmap != null) {
+        if (bitmap != null) {
             Image(
-                bitmap = thumbBitmap,
+                bitmap = bitmap!!.asImageBitmap(),
                 contentDescription = "Recording thumbnail",
-                modifier = Modifier.size(96.dp)
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
             )
         } else {
             Box(
-                modifier = Modifier.size(96.dp).background(Color.DarkGray, shape = MaterialTheme.shapes.medium),
+                modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text("No Preview", color = Color.White, fontWeight = FontWeight.Bold)
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Play",
+                    tint = Color.White,
+                    modifier = Modifier.size(48.dp)
+                )
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = item.filename,
-            style = MaterialTheme.typography.bodySmall,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1
-        )
-        Text(
-            text = dateFormat.format(item.date),
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.Gray
-        )
+        
+        // Overlay info (resolution, size, duration, timestamp)
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(8.dp)
+        ) {
+            Text(
+                text = "Recording at " + SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(item.file.lastModified())),
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = readableFileSize(item.file.length()),
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                // TODO: Show duration and resolution if available
+            }
+        }
+        
+        // Play button overlay
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = "Play",
+                tint = Color.White.copy(alpha = 0.7f),
+                modifier = Modifier.size(48.dp)
+            )
+        }
     }
+}
+
+fun readableFileSize(size: Long): String {
+    if (size <= 0) return "0 B"
+    val units = arrayOf("B", "KB", "MB", "GB", "TB")
+    var i = 0
+    var currentSize = size.toDouble()
+    while (currentSize >= 1024 && i < units.size - 1) {
+        currentSize /= 1024
+        i++
+    }
+    return String.format("%.1f %s", currentSize, units[i])
 } 

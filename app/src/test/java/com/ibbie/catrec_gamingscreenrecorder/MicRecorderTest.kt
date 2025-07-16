@@ -82,41 +82,6 @@ class MicRecorderTest {
     }
 
     @Test
-    fun testNoiseSuppressionSetting() {
-        try {
-            micRecorder.setNoiseSuppression(true)
-            // The noise suppression setting should not throw an exception
-            assertTrue(true)
-        } catch (e: Exception) {
-            fail("Noise suppression setting should not throw exception: ${e.message}")
-        }
-    }
-
-    @Test
-    fun testNoiseSuppressionParameterRespected() {
-        // Test with noise suppression disabled
-        val recorderWithoutNoiseSuppression = MicRecorder(
-            context = mockContext,
-            outputFile = tempFile,
-            enableNoiseSuppressor = false
-        )
-        
-        // Test with noise suppression enabled
-        val recorderWithNoiseSuppression = MicRecorder(
-            context = mockContext,
-            outputFile = tempFile,
-            enableNoiseSuppressor = true
-        )
-        
-        // Both should initialize without crashing
-        assertTrue(true)
-        
-        // Clean up
-        recorderWithoutNoiseSuppression.cleanup()
-        recorderWithNoiseSuppression.cleanup()
-    }
-
-    @Test
     fun testMuteSetting() {
         try {
             micRecorder.setMuted(true)

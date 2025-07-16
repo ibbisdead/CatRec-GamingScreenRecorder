@@ -55,15 +55,17 @@ import kotlinx.coroutines.Dispatchers
 import com.google.android.gms.ads.MobileAds
 import com.google.firebase.FirebaseApp
 import kotlin.OptIn
+import overlay.RecordingOverlay
+import android.util.DisplayMetrics
 
 class MainActivity : ComponentActivity() {
 
     private var projectionIntent: Intent? = null
     private var projectionResultCode: Int = 0
-    private var recordMic = true
-    private var recordInternal = true
-    private var isDarkTheme = true // Default to dark theme for AMOLED
+    private var recordInternal: Boolean = true
+    private var recordMic: Boolean = true
     private var orientation: String = "Auto"
+    private var isDarkTheme: Boolean = true
     private var permissionsRequested = false
 
     // Snackbar state for permission denial
@@ -82,6 +84,7 @@ class MainActivity : ComponentActivity() {
     private val settingsDataStore by lazy { SettingsDataStore(this) }
     private val analyticsManager by lazy { AnalyticsManager(this) }
     private val updateManager by lazy { UpdateManager(this) }
+    private var recordingOverlay: RecordingOverlay? = null
 
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -171,6 +174,25 @@ class MainActivity : ComponentActivity() {
             var rationaleRequested by remember { mutableStateOf(false) }
             var showStorageDialog by remember { mutableStateOf(false) }
             var proceedWithLowStorage by remember { mutableStateOf(false) }
+
+            // Overlay observer
+            val overlayEnabledState = produceState(initialValue = false) {
+                value = settingsDataStore.overlayEnabled.first()
+                settingsDataStore.overlayEnabled.collect { enabled ->
+                    value = enabled
+                    runOnUiThread {
+                        if (enabled) {
+                            if (recordingOverlay == null) {
+                                recordingOverlay = RecordingOverlay(this@MainActivity)
+                                recordingOverlay?.show()
+                            }
+                        } else {
+                            recordingOverlay?.hide()
+                            recordingOverlay = null
+                        }
+                    }
+                }
+            }
             
             CatRecTheme(darkTheme = isDarkTheme) {
                 Surface(
@@ -179,14 +201,14 @@ class MainActivity : ComponentActivity() {
                 ) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         CatRecApp(
-                            onStartRecording = { recordMic, recordInternal, orientation ->
+                            onStartRecording = { recordMic: Boolean, recordInternal: Boolean, orientation: String ->
                                 pendingMicRequest = recordMic
                                 rationaleRequested = false
                                 requestCapturePermission(recordMic, recordInternal, coroutineScope, {
                                     showMicRationale = true
                                 }, rationaleRequested, orientation)
                             },
-                            onThemeChange = { darkTheme ->
+                            onThemeChange = { darkTheme: Boolean ->
                                 isDarkTheme = darkTheme
                             },
                             darkTheme = isDarkTheme
@@ -209,7 +231,7 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                     "Try Again" -> {
                                                         rationaleRequested = false
-                                                        requestCapturePermission(pendingMicRequest, recordInternal, coroutineScope, {
+                                                        requestCapturePermission(pendingMicRequest, this@MainActivity.recordInternal, coroutineScope, {
                                                             showMicRationale = true
                                                         }, rationaleRequested)
                                                     }
@@ -414,34 +436,45 @@ class MainActivity : ComponentActivity() {
     private fun requestCapturePermission(
         recordMic: Boolean,
         recordInternal: Boolean,
-        coroutineScope: CoroutineScope = CoroutineScope(kotlinx.coroutines.Dispatchers.Main),
-        showRationale: () -> Unit = {},
+        coroutineScope: CoroutineScope? = null,
+        onRationale: (() -> Unit)? = null,
         rationaleRequested: Boolean = false,
         orientation: String = "Auto"
     ) {
-        var shouldRecordMic = recordMic
-        this.recordInternal = recordInternal
-        
-        // Request microphone permission only when user tries to record with mic
-        if (shouldRecordMic) {
-            if (!isMicrophoneAvailable()) {
-                shouldRecordMic = false
-            } else if (!hasMicrophonePermission()) {
-                if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.RECORD_AUDIO) && !rationaleRequested) {
-                    showRationale()
-                } else {
-                    audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                }
-                return
+        coroutineScope?.launch {
+            val settings = settingsDataStore.settingsFlow.first()
+            val resolution = settings.resolution
+            val (width, height) = if (resolution == "Native") {
+                val metrics = resources.displayMetrics
+                metrics.widthPixels to metrics.heightPixels
+            } else {
+                val parts = resolution.split("x")
+                if (parts.size == 2) parts[0].toInt() to parts[1].toInt() else 1280 to 720
             }
+            var shouldRecordMic = recordMic
+            this@MainActivity.recordInternal = recordInternal
+            
+            // Request microphone permission only when user tries to record with mic
+            if (shouldRecordMic) {
+                if (!isMicrophoneAvailable()) {
+                    shouldRecordMic = false
+                } else if (!hasMicrophonePermission()) {
+                    if (ActivityCompat.shouldShowRequestPermissionRationale(this@MainActivity, Manifest.permission.RECORD_AUDIO) && !rationaleRequested) {
+                        onRationale?.invoke()
+                    } else {
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
+                    return@launch
+                }
+            }
+            
+            this@MainActivity.recordMic = shouldRecordMic
+            this@MainActivity.orientation = orientation
+            
+            // Request media projection permission only when starting recording
+            val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
         }
-        
-        this.recordMic = shouldRecordMic
-        this.orientation = orientation
-        
-        // Request media projection permission only when starting recording
-        val projectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        screenCaptureLauncher.launch(projectionManager.createScreenCaptureIntent())
     }
 
     private fun hasMicrophonePermission(): Boolean {
@@ -508,9 +541,11 @@ class MainActivity : ComponentActivity() {
             val intent = Intent(this, ScreenRecorderService::class.java).apply {
                 action = "START_RECORDING"
                 putExtra("resultCode", projectionResultCode)
-                putExtra("data", data)
-                putExtra("recordMic", recordMic)
-                putExtra("recordInternalAudio", recordInternal)
+                putExtra("data", projectionIntent)
+                putExtra("width", 1280) // Default width
+                putExtra("height", 720) // Default height
+                putExtra("density", resources.displayMetrics.densityDpi)
+                putExtra("bitrate", 1000000) // Default bitrate
                 putExtra("orientation", orientation)
             }
                 startForegroundService(intent)

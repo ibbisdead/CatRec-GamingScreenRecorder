@@ -94,6 +94,7 @@ class ScreenRecorderService : Service() {
     private var highlightTimestamps = mutableListOf<Long>()
     private var autoHighlightDetection = false
     private var recordingFileName: String? = null
+    private var micOutputFile: File? = null
 
     private val stopRecordingReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -237,22 +238,27 @@ class ScreenRecorderService : Service() {
 
         vibrateStart()
 
-        // Generate timestamped file name
-        val timestamp = SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.getDefault()).format(Date())
-        recordingFileName = "CatRec_${timestamp}.mp4"
-        Log.d("RecordingDebug", "Recording filename: $recordingFileName")
-
-        // Read selected resolution
-        var targetWidth = width
-        var targetHeight = height
-        runBlocking {
-            when (settingsDataStore.resolution.first()) {
-                "1280x720" -> { targetWidth = 1280; targetHeight = 720 }
-                "1920x1080" -> { targetWidth = 1920; targetHeight = 1080 }
-                // "Native" or unknown: use provided width/height
-            }
+        // Use width and height directly for VirtualDisplay and MediaCodec
+        screenWidth = width
+        screenHeight = height
+        screenDensity = density
+        bitrate = bitrateValue
+        
+        // Create Movies/CatRec directory if it doesn't exist
+        val moviesDir = File("/storage/emulated/0/Movies/CatRec")
+        if (!moviesDir.exists()) {
+            moviesDir.mkdirs()
         }
-        Log.d("RecordingDebug", "Target resolution: ${targetWidth}x${targetHeight}")
+        
+        // Generate filename with timestamp
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        recordingFileName = "CatRec_$timestamp.mp4"
+        
+        // Set output file to Movies/CatRec folder
+        outputFile = File(moviesDir, recordingFileName!!)
+        
+        // Set mic output file to Movies/CatRec folder
+        micOutputFile = File(moviesDir, "mic_audio.aac")
 
         // Auto-stop timer
         GlobalScope.launch(Dispatchers.Main) {
@@ -273,15 +279,6 @@ class ScreenRecorderService : Service() {
         // Show recording indicator overlay
         // REMOVE: All references to RecordingOverlay, recordingOverlay variable, and overlay logic
         Log.d("RecordingDebug", "Recording overlay shown")
-
-        screenWidth = targetWidth
-        screenHeight = targetHeight
-        screenDensity = density
-        bitrate = bitrateValue
-
-        // Create output file
-        outputFile = File(getExternalFilesDir(null), recordingFileName ?: "CatRec_unknown.mp4")
-        Log.d("RecordingDebug", "Output file created: ${outputFile?.absolutePath}")
 
         // Start audio recording with new combined system
         try {
@@ -816,7 +813,22 @@ class ScreenRecorderService : Service() {
                         outputFile.delete()
                         trimmedFile.renameTo(outputFile)
                         Log.d(TAG, "Auto-trimmed video: ${outputFile.absolutePath}")
-                        generateThumbnail(outputFile)
+                        // Regenerate thumbnail for trimmed file
+                        try {
+                            val retriever = MediaMetadataRetriever()
+                            retriever.setDataSource(outputFile.absolutePath)
+                            val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                            if (frame != null) {
+                                val thumbFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_thumbnail.png")
+                                FileOutputStream(thumbFile).use { out ->
+                                    frame.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                }
+                                Log.d(TAG, "Thumbnail updated: ${thumbFile.absolutePath}")
+                            }
+                            retriever.release()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Thumbnail update failed: ${e.message}")
+                        }
                     } else {
                         Log.e(TAG, "Auto-trim failed, using untrimmed file.")
                         CoroutineScope(Dispatchers.IO).launch {
@@ -833,7 +845,7 @@ class ScreenRecorderService : Service() {
         }
 
         // Generate thumbnail after muxing
-        generateThumbnail(outputFile)
+        // generateThumbnail(outputFile) - REMOVED
 
         // Launch PlaybackActivity for preview
         val playbackIntent = Intent(this@ScreenRecorderService, PlaybackActivity::class.java)
@@ -861,31 +873,6 @@ class ScreenRecorderService : Service() {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create video-only fallback: ${e.message}")
-        }
-    }
-
-    private fun generateThumbnail(outputFile: File) {
-        GlobalScope.launch(Dispatchers.IO) {
-            try {
-                val retriever = MediaMetadataRetriever()
-                retriever.setDataSource(outputFile.absolutePath)
-                val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-                val randomTime = if (durationMs > 0) (1000000L..(durationMs * 1000L - 1)).random() else 0L
-                val frame = retriever.getFrameAtTime(randomTime, MediaMetadataRetriever.OPTION_CLOSEST)
-                if (frame != null) {
-                    val thumbFile = File(outputFile.parent, outputFile.nameWithoutExtension + "_thumbnail.png")
-                    FileOutputStream(thumbFile).use { out ->
-                        frame.compress(Bitmap.CompressFormat.PNG, 100, out)
-                    }
-                    Log.d(TAG, "Thumbnail generated (random frame): ${thumbFile.absolutePath}")
-                }
-                retriever.release()
-            } catch (e: Exception) {
-                Log.e(TAG, "Thumbnail generation failed: ${e.message}")
-                CoroutineScope(Dispatchers.IO).launch {
-                    logCrashlyticsIfEnabled("Thumbnail generation failed: ${e.message}", e, this@ScreenRecorderService)
-                }
-            }
         }
     }
 
@@ -970,11 +957,7 @@ class ScreenRecorderService : Service() {
         combinedAudioRecorder?.setMuted(isMicMuted)
     }
 
-    private fun updateNoiseSuppression(enabled: Boolean) {
-        if (!isRecording) return
-        micRecorder?.setNoiseSuppression(enabled)
-        Log.d(TAG, "Noise suppression updated to: $enabled")
-    }
+    // Remove noise suppression function
 
     private fun startHighlightDetection() {
         // Simple real-time volume spike detection on combined audio

@@ -233,12 +233,17 @@ class RecordingOverlay(private val context: Context) {
 
     private fun updateOverlayColorForCloseZone(inCloseZone: Boolean) {
         val bubbleContainer = overlayView?.findViewById<RelativeLayout>(R.id.bubble_container)
+        val closeX = closeZoneView?.findViewById<TextView>(R.id.close_x)
         overlayInCloseZone = inCloseZone
-        
+
         if (inCloseZone) {
             bubbleContainer?.setBackgroundColor(Color.parseColor("#CCFF4444"))
+            closeX?.setTextColor(Color.RED)
+            closeX?.setBackgroundColor(Color.WHITE)
         } else {
             bubbleContainer?.setBackgroundResource(R.drawable.bubble_background)
+            closeX?.setTextColor(Color.BLACK)
+            closeX?.setBackgroundColor(Color.TRANSPARENT)
         }
     }
 

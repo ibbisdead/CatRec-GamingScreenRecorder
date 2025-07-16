@@ -25,14 +25,14 @@ object SettingsKeys {
     val AUDIO_CHANNEL = stringPreferencesKey("audio_channel")
     val FPS = intPreferencesKey("fps")
     val MIC_VOLUME = intPreferencesKey("mic_volume")
-    val NOISE_SUPPRESSION = booleanPreferencesKey("noise_suppression")
     val PAUSE_ON_SCREEN_OFF = booleanPreferencesKey("pause_on_screen_off")
     val PAUSE_ENABLED = booleanPreferencesKey("pause_enabled")
     val MIC_MUTE_ENABLED = booleanPreferencesKey("mic_mute_enabled")
+    val OVERLAY_ENABLED = booleanPreferencesKey("overlay_enabled")
 
     val AUDIO_SOURCE = stringPreferencesKey("audio_source")
     val ORIENTATION = stringPreferencesKey("orientation")
-    val FILE_DESTINATION = stringPreferencesKey("file_destination")
+    // Remove FILE_DESTINATION key
     val SHOW_TOUCHES = booleanPreferencesKey("show_touches")
     val COUNTDOWN = intPreferencesKey("countdown")
     val STOP_OPTIONS = stringSetPreferencesKey("stop_options")
@@ -67,16 +67,16 @@ class SettingsDataStore(internal val context: Context) {
     val audioChannel: Flow<String> = context.settingsDataStore.data.map { it[SettingsKeys.AUDIO_CHANNEL] ?: "Stereo" }
     val fps: Flow<Int> = context.settingsDataStore.data.map { it[SettingsKeys.FPS] ?: 60 }
     val micVolume: Flow<Int> = context.settingsDataStore.data.map { it[SettingsKeys.MIC_VOLUME] ?: 100 }
-    val noiseSuppression: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.NOISE_SUPPRESSION] ?: true }
     val pauseOnScreenOff: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.PAUSE_ON_SCREEN_OFF] ?: false }
     val pauseEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.PAUSE_ENABLED] ?: false }
     val micMuteEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.MIC_MUTE_ENABLED] ?: false }
+    val overlayEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.OVERLAY_ENABLED] ?: true }
     val analyticsEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.ANALYTICS_ENABLED] ?: false }
     val autoUpdateCheckEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.AUTO_UPDATE_CHECK_ENABLED] ?: true }
     val crashReportingEnabled: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.CRASH_REPORTING_ENABLED] ?: false }
     val audioSource: Flow<String> = context.settingsDataStore.data.map { it[SettingsKeys.AUDIO_SOURCE] ?: "System Audio" }
     val orientation: Flow<String> = context.settingsDataStore.data.map { it[SettingsKeys.ORIENTATION] ?: "Auto" }
-    val fileDestination: Flow<String> = context.settingsDataStore.data.map { it[SettingsKeys.FILE_DESTINATION] ?: "/storage/emulated/0/Movies/CatRec" }
+    // Remove fileDestination flow - hardcoded to Movies/CatRec
     val showTouches: Flow<Boolean> = context.settingsDataStore.data.map { it[SettingsKeys.SHOW_TOUCHES] ?: false }
     val countdown: Flow<Int> = context.settingsDataStore.data.map { it[SettingsKeys.COUNTDOWN] ?: 0 }
     val stopOptions: Flow<Set<String>> = context.settingsDataStore.data.map { it[SettingsKeys.STOP_OPTIONS] ?: setOf("Screen Off") }
@@ -109,16 +109,16 @@ class SettingsDataStore(internal val context: Context) {
             audioChannel = preferences[SettingsKeys.AUDIO_CHANNEL] ?: "Stereo",
             fps = preferences[SettingsKeys.FPS] ?: 60,
             micVolume = preferences[SettingsKeys.MIC_VOLUME] ?: 100,
-            noiseSuppression = preferences[SettingsKeys.NOISE_SUPPRESSION] ?: true,
             pauseOnScreenOff = preferences[SettingsKeys.PAUSE_ON_SCREEN_OFF] ?: false,
             pauseEnabled = preferences[SettingsKeys.PAUSE_ENABLED] ?: false,
             micMuteEnabled = preferences[SettingsKeys.MIC_MUTE_ENABLED] ?: false,
+            overlayEnabled = preferences[SettingsKeys.OVERLAY_ENABLED] ?: true,
             analyticsEnabled = preferences[SettingsKeys.ANALYTICS_ENABLED] ?: false,
             autoUpdateCheckEnabled = preferences[SettingsKeys.AUTO_UPDATE_CHECK_ENABLED] ?: true,
             crashReportingEnabled = preferences[SettingsKeys.CRASH_REPORTING_ENABLED] ?: false,
             audioSource = preferences[SettingsKeys.AUDIO_SOURCE] ?: "System Audio",
             orientation = preferences[SettingsKeys.ORIENTATION] ?: "Auto",
-            fileDestination = preferences[SettingsKeys.FILE_DESTINATION] ?: "/storage/emulated/0/Movies/CatRec",
+            // Remove fileDestination - hardcoded to Movies/CatRec
             showTouches = preferences[SettingsKeys.SHOW_TOUCHES] ?: false,
             countdown = preferences[SettingsKeys.COUNTDOWN] ?: 0,
             stopOptions = preferences[SettingsKeys.STOP_OPTIONS] ?: setOf("Screen Off"),
@@ -153,6 +153,7 @@ class SettingsDataStore(internal val context: Context) {
     suspend fun setPauseOnScreenOff(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.PAUSE_ON_SCREEN_OFF] = value }
     suspend fun setPauseEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.PAUSE_ENABLED] = value }
     suspend fun setMicMuteEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.MIC_MUTE_ENABLED] = value }
+    suspend fun setOverlayEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.OVERLAY_ENABLED] = value }
     suspend fun setGestureControlsEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.GESTURE_CONTROLS_ENABLED] = value }
     suspend fun setCloudBackupEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.CLOUD_BACKUP_ENABLED] = value }
     suspend fun setCloudBackupProvider(value: String) = context.settingsDataStore.edit { it[SettingsKeys.CLOUD_BACKUP_PROVIDER] = value }
@@ -160,7 +161,6 @@ class SettingsDataStore(internal val context: Context) {
     suspend fun setVideoBitrate(value: Int) = context.settingsDataStore.edit { it[SettingsKeys.VIDEO_BITRATE] = value }
     suspend fun setFps(value: Int) = context.settingsDataStore.edit { it[SettingsKeys.FPS] = value }
     suspend fun setMicVolume(value: Int) = context.settingsDataStore.edit { it[SettingsKeys.MIC_VOLUME] = value }
-    suspend fun setNoiseSuppression(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.NOISE_SUPPRESSION] = value }
     suspend fun setShowTouches(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.SHOW_TOUCHES] = value }
     suspend fun setAutoTrimEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.AUTO_TRIM_ENABLED] = value }
     suspend fun setAutoTrimStartSeconds(value: Int) = context.settingsDataStore.edit { it[SettingsKeys.AUTO_TRIM_START] = value }
@@ -193,7 +193,7 @@ class SettingsDataStore(internal val context: Context) {
     suspend fun setAudioSampleRate(value: String) = context.settingsDataStore.edit { it[SettingsKeys.AUDIO_SAMPLE_RATE] = value }
     suspend fun setAudioChannel(value: String) = context.settingsDataStore.edit { it[SettingsKeys.AUDIO_CHANNEL] = value }
     suspend fun setAudioSource(value: String) = context.settingsDataStore.edit { it[SettingsKeys.AUDIO_SOURCE] = value }
-    suspend fun setFileDestination(value: String) = context.settingsDataStore.edit { it[SettingsKeys.FILE_DESTINATION] = value }
+    suspend fun setStopOptions(value: Set<String>) = context.settingsDataStore.edit { it[SettingsKeys.STOP_OPTIONS] = value }
     suspend fun setAutoDeleteEnabled(value: Boolean) = context.settingsDataStore.edit { it[SettingsKeys.AUTO_DELETE_ENABLED] = value }
     suspend fun setRetentionDays(value: Int) = context.settingsDataStore.edit { it[SettingsKeys.RETENTION_DAYS] = value }
 } 

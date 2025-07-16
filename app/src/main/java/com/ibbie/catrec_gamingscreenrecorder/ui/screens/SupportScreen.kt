@@ -70,7 +70,7 @@ fun SupportScreen(
             
             // App icon
             Image(
-                painter = painterResource(id = R.drawable.ic_launcher_foreground), // <-- update to new logo asset
+                painter = painterResource(id = R.drawable.catrec_icon), // <-- using existing logo asset
                 contentDescription = "CatRec Icon",
                 modifier = Modifier.size(120.dp)
             )

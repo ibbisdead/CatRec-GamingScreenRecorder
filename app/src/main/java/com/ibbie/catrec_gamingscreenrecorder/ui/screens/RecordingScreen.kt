@@ -71,6 +71,14 @@ import androidx.compose.foundation.Image
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import com.google.accompanist.swiperefresh.SwipeRefresh
+import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
+import android.media.MediaMetadataRetriever
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import android.graphics.Bitmap
 
 @Composable
 fun RecordingScreen(
@@ -88,6 +96,7 @@ fun RecordingScreen(
     var sortByNewest by remember { mutableStateOf(true) }
     var selectedRecording by remember { mutableStateOf<File?>(null) }
     var showSortDropdown by remember { mutableStateOf(false) }
+    val isRefreshing = remember { mutableStateOf(false) }
 
     // Load recordings on first composition
     LaunchedEffect(Unit) {
@@ -114,6 +123,7 @@ fun RecordingScreen(
         if (!isRecording.value) {
             delay(1000)
             loadRecordings(context, recordings, sortByNewest)
+            // Do NOT set selectedRecording here; prevents auto-opening video player
         }
     }
 
@@ -173,66 +183,30 @@ fun RecordingScreen(
                     Text("No recordings found.", color = Color.Gray)
                 }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(220.dp),
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                    contentPadding = PaddingValues(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                SwipeRefresh(
+                    state = rememberSwipeRefreshState(isRefreshing.value),
+                    onRefresh = {
+                        isRefreshing.value = true
+                        loadRecordings(context, recordings, sortByNewest)
+                        isRefreshing.value = false
+                    }
                 ) {
-                    items(recordings) { file ->
-                        RecordingThumbnail(
-                            file = file,
-                            darkTheme = darkTheme,
-                            onClick = { selectedRecording = file }
-                        )
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(220.dp),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                        contentPadding = PaddingValues(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(recordings) { file ->
+                            RecordingThumbnail(
+                                file = file,
+                                darkTheme = darkTheme,
+                                onClick = { selectedRecording = file }
+                            )
+                        }
                     }
                 }
-            }
-        }
-        // Audio source indicator with settings shortcut
-        Card(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(start = 32.dp, end = 32.dp, bottom = 180.dp)
-                .clickable {
-                    // Open audio source settings - this could navigate to settings screen
-                    // For now, we'll just show a toast
-                    android.widget.Toast.makeText(
-                        context,
-                        "Change audio source in Settings",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                },
-            colors = CardDefaults.cardColors(
-                containerColor = Color(0xCC000000)
-            ),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = when (settings.audioSource) {
-                        "Mic" -> Icons.Default.Mic
-                        "System Audio" -> Icons.Default.VolumeUp
-                        "System Audio + Mic" -> Icons.Default.RecordVoiceOver
-                        else -> Icons.Default.VolumeUp
-                    },
-                    contentDescription = null,
-                    tint = Color(0xFFD32F2F),
-                    modifier = Modifier
-                        .size(16.dp)
-                        .padding(end = 4.dp)
-                )
-                Text(
-                    text = settings.audioSource,
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
             }
         }
         
@@ -243,6 +217,7 @@ fun RecordingScreen(
                     val stopIntent = Intent(context, com.ibbie.catrec_gamingscreenrecorder.ScreenRecorderService::class.java)
                     stopIntent.action = "com.ibbie.catrec.ACTION_STOP"
                     context.startService(stopIntent)
+                    isRecording.value = false // Update immediately
                 } else {
                     // Use audio source setting to determine what to record
                     val recordMic = when (settings.audioSource) {
@@ -258,6 +233,7 @@ fun RecordingScreen(
                         else -> true
                     }
                     onStartRecording(recordMic, recordInternal, settings.orientation)
+                    isRecording.value = true // Update immediately
                 }
             },
             shape = CircleShape,
@@ -406,16 +382,33 @@ fun RecordingItem(
 }
 
 // Helper functions (same as before)
-private fun loadRecordings(context: Context, recordings: MutableList<File>, sortByNewest: Boolean) {
-    val dir = context.getExternalFilesDir(null)
-    val files = dir?.listFiles()?.filter { 
-        it.name.endsWith("_final.mp4") || 
-        it.name.endsWith("_with_audio.mp4") || 
-        it.name.endsWith("_video_only.mp4") 
-    } ?: emptyList()
-    val sorted = if (sortByNewest) files.sortedByDescending { it.lastModified() } else files.sortedBy { it.lastModified() }
-    recordings.clear()
-    recordings.addAll(sorted)
+fun loadRecordings(context: Context, recordings: MutableList<File>, sortByNewest: Boolean) {
+    kotlinx.coroutines.GlobalScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            // Look in Movies/CatRec folder instead of app-specific storage
+            val moviesDir = File("/storage/emulated/0/Movies/CatRec")
+            if (!moviesDir.exists()) {
+                moviesDir.mkdirs()
+            }
+            
+            val videoFiles = moviesDir.listFiles { file ->
+                file.isFile && file.extension.lowercase() in listOf("mp4", "avi", "mov", "mkv")
+            }?.toList() ?: emptyList()
+            
+            val sortedFiles = if (sortByNewest) {
+                videoFiles.sortedByDescending { it.lastModified() }
+            } else {
+                videoFiles.sortedBy { it.lastModified() }
+            }
+            
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                recordings.clear()
+                recordings.addAll(sortedFiles)
+            }
+        } catch (e: Exception) {
+            Log.e("RecordingScreen", "Error loading recordings", e)
+        }
+    }
 }
 
 private fun isServiceRunning(context: Context): Boolean {
@@ -489,89 +482,47 @@ fun RecordingThumbnail(
     darkTheme: Boolean,
     onClick: () -> Unit
 ) {
-    val thumbFile = remember(file) {
-        File(file.parent, file.nameWithoutExtension + "_thumbnail.png")
-    }
-    val thumbBitmap = remember(thumbFile) {
-        if (thumbFile.exists()) {
+    val context = LocalContext.current
+    var bitmap by remember { mutableStateOf<Bitmap?>(null) }
+    
+    LaunchedEffect(file) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                BitmapFactory.decodeFile(thumbFile.absolutePath)?.asImageBitmap()
-            } catch (_: Exception) { null }
-        } else null
+                val retriever = MediaMetadataRetriever()
+                retriever.setDataSource(file.absolutePath)
+                
+                // Get first frame instead of looking for thumbnail file
+                val frame = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                if (frame != null) {
+                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        bitmap = frame
+                    }
+                }
+                retriever.release()
+            } catch (e: Exception) {
+                Log.e("RecordingThumbnail", "Error loading thumbnail", e)
+            }
+        }
     }
-    Box(
-        modifier = Modifier
-            .aspectRatio(16f / 9f)
-            .clip(MaterialTheme.shapes.medium)
-            .background(Color.DarkGray)
-            .clickable { onClick() }
-    ) {
-        if (thumbBitmap != null) {
-            Image(
-                bitmap = thumbBitmap,
-                contentDescription = "Recording thumbnail",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = "Play",
-                    tint = Color.White,
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-        }
-        // Overlay info (resolution, size, duration, timestamp)
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(8.dp)
-        ) {
-            Text(
-                text = "Recording at " + SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(file.lastModified())),
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = readableFileSize(file.length()),
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(end = 8.dp)
-                )
-                // TODO: Show duration and resolution if available
-            }
-        }
-        // Play button overlay
+    
+    if (bitmap != null) {
+        Image(
+            bitmap = bitmap!!.asImageBitmap(),
+            contentDescription = "Recording thumbnail",
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+    } else {
         Box(
             modifier = Modifier
-                .fillMaxSize(),
+                .fillMaxSize()
+                .background(Color.Gray),
             contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.PlayArrow,
-                contentDescription = "Play",
-                tint = Color.White.copy(alpha = 0.7f),
-                modifier = Modifier.size(48.dp)
-            )
+            Text("No Preview", color = Color.White)
         }
     }
 }
-
-fun readableFileSize(size: Long): String {
-    if (size <= 0) return "0 B"
-    val units = arrayOf("B", "KB", "MB", "GB", "TB")
-    val digitGroups = (Math.log10(size.toDouble()) / Math.log10(1024.0)).toInt()
-    return String.format("%.2f %s", size / Math.pow(1024.0, digitGroups.toDouble()), units[digitGroups])
-} 
 
 @Composable
 fun VideoPlayerOverlay(
@@ -586,10 +537,17 @@ fun VideoPlayerOverlay(
     var videoDuration by remember { mutableStateOf(0) }
     var videoView: VideoView? by remember { mutableStateOf(null) }
 
+    fun formatDuration(ms: Int): String {
+        val totalSeconds = ms / 1000
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return "%d:%02d".format(minutes, seconds)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.95f))
+            .background(Color.Black) // Fully opaque
             .zIndex(10f)
     ) {
         // Video
@@ -638,23 +596,41 @@ fun VideoPlayerOverlay(
                 modifier = Modifier.size(64.dp)
             )
         }
-        // Seek bar
-        Slider(
-            value = videoPosition.toFloat(),
-            onValueChange = {
-                videoPosition = it.toInt()
-                videoView?.seekTo(videoPosition)
-            },
-            valueRange = 0f..(videoDuration.toFloat().coerceAtLeast(1f)),
+        // Seek bar with duration
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .padding(horizontal = 32.dp, vertical = 48.dp),
-            colors = SliderDefaults.colors(
-                thumbColor = Color(0xFFD32F2F),
-                activeTrackColor = Color(0xFFD32F2F)
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Slider(
+                value = videoPosition.toFloat(),
+                onValueChange = {
+                    videoPosition = it.toInt()
+                    videoView?.seekTo(videoPosition)
+                },
+                valueRange = 0f..(videoDuration.toFloat().coerceAtLeast(1f)),
+                modifier = Modifier.weight(1f),
+                colors = SliderDefaults.colors(
+                    thumbColor = Color(0xFFD32F2F),
+                    activeTrackColor = Color(0xFFD32F2F)
+                ),
+                thumb = {
+                    Box(
+                        Modifier
+                            .size(20.dp)
+                            .background(Color(0xFFD32F2F), shape = CircleShape)
+                    )
+                }
             )
-        )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = "${formatDuration(videoPosition)} / ${formatDuration(videoDuration)}",
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+        }
         // Top bar with close, share, delete
         Row(
             modifier = Modifier

@@ -33,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,6 +71,11 @@ import com.ibbie.catrec_gamingscreenrecorder.UpdateManager
 import com.ibbie.catrec_gamingscreenrecorder.viewmodel.SettingsViewModel
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.util.lerp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -208,8 +214,8 @@ fun SettingsScreen(
                         }
                     }
                     
-                    // Stop Options
                     // Stopping Options
+                    var stopOptionsExpanded by remember { mutableStateOf(false) }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -223,29 +229,34 @@ fun SettingsScreen(
                         )
                         Box(contentAlignment = Alignment.CenterEnd) {
                             Button(
-                                onClick = { showStopOptionsDialog = true },
+                                onClick = { stopOptionsExpanded = true },
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
                             ) {
                                 Text(
-                                    text = if (settings.stopOptions.size > 1) "Multiple" else settings.stopOptions.firstOrNull() ?: "None",
+                                    text = if (settings.stopOptions.isNotEmpty()) settings.stopOptions.joinToString(", ") else "None",
                                     color = Color.White,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                             DropdownMenu(
-                                expanded = showStopOptionsDialog,
-                                onDismissRequest = { showStopOptionsDialog = false }
+                                expanded = stopOptionsExpanded,
+                                onDismissRequest = { stopOptionsExpanded = false }
                             ) {
                                 listOf("Screen Off", "Notification Bar", "Shake Device").forEach { option ->
+                                    val selected = option in settings.stopOptions
                                     DropdownMenuItem(
-                                        text = { Text(option) },
+                                        text = { Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Checkbox(
+                                                checked = selected,
+                                                onCheckedChange = null // handled below
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(option)
+                                        } },
                                         onClick = {
-                                            showStopOptionsDialog = false
                                             scope.launch {
-                                                // settingsDataStore.setStopOptions(settings.stopOptions + option) // Removed: function does not exist
-                                                if (option == "Screen Off") {
-                                                    settingsDataStore.setPauseOnScreenOff(false)
-                                                }
+                                                val newOptions = if (selected) settings.stopOptions - option else settings.stopOptions + option
+                                                settingsDataStore.setStopOptions(newOptions)
                                             }
                                         }
                                     )
@@ -285,6 +296,30 @@ fun SettingsScreen(
                         )
                     }
                     
+                    // Overlay Feature Toggle
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Floating Overlay",
+                            modifier = Modifier.weight(1f),
+                            color = if (darkTheme) Color.White else Color.Black
+                        )
+                        Switch(
+                            checked = settings.overlayEnabled,
+                            onCheckedChange = {
+                                scope.launch { settingsDataStore.setOverlayEnabled(it) }
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color(0xFFD32F2F),
+                                checkedTrackColor = Color(0xFFD32F2F).copy(alpha = 0.5f)
+                            )
+                        )
+                    }
+                    
                     
                 }
             }
@@ -299,9 +334,10 @@ fun SettingsScreen(
                     // Resolution
                     var resolutionExpanded by remember { mutableStateOf(false) }
                     val resolutionOptions = listOf(
-                        "Native" to "Device Native",
+                        "640x480" to "480p (640x480)",
                         "1280x720" to "720p (1280x720)",
-                        "1920x1080" to "1080p (1920x1080)"
+                        "1920x1080" to "1080p (1920x1080)",
+                        "Native" to "Device Native"
                     )
                     // Replace the Resolution dropdown with a right-aligned button and DropdownMenu:
                     // Resolution
@@ -664,48 +700,7 @@ fun SettingsScreen(
                         }
                     }
                     
-                    // Recording Destination
-                    var destinationExpanded by remember { mutableStateOf(false) }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Recording Destination",
-                            modifier = Modifier.weight(1f),
-                            color = if (darkTheme) Color.White else Color.Black
-                        )
-                        Box(
-                            contentAlignment = Alignment.CenterEnd
-                        ) {
-                            Button(
-                                onClick = { destinationExpanded = true },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD32F2F))
-                            ) {
-                                Text(
-                                    text = if (settings.fileDestination.contains("Movies")) "Movies/CatRec" else "App Specific",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = destinationExpanded,
-                                onDismissRequest = { destinationExpanded = false }
-                            ) {
-                                listOf("/storage/emulated/0/Movies/CatRec", "App Specific").forEach { option ->
-                                    DropdownMenuItem(
-                                        text = { Text(option) },
-                                        onClick = {
-                                            destinationExpanded = false
-                                            scope.launch { settingsDataStore.setFileDestination(option) }
-                                        }
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    // Remove the entire file destination section
 
 
                 }
@@ -818,6 +813,9 @@ fun SettingsScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 // Check for Updates
+                var isCheckingUpdates by remember { mutableStateOf(false) }
+                var updateCheckRotation by remember { mutableStateOf(0f) }
+                
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
@@ -828,30 +826,59 @@ fun SettingsScreen(
                             color = if (darkTheme) Color.White else Color.Black
                         )
                         Text(
-                            text = "Check for app updates from Google Play",
+                            text = if (isCheckingUpdates) "Checking for updates..." else "Check for app updates from Google Play",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.Gray
                         )
                     }
                     IconButton(
                         onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            scope.launch {
-                                try {
-                                    val updateManager = UpdateManager(context)
-                                    updateManager.checkForUpdates(context as Activity, forceCheck = true)
-                                    analyticsManager.logEvent("manual_update_check")
-                                } catch (e: Exception) {
-                                    Log.e("SettingsScreen", "Error checking for updates", e)
+                            if (!isCheckingUpdates) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                isCheckingUpdates = true
+                                updateCheckRotation = 0f
+                                
+                                scope.launch {
+                                    try {
+                                        val updateManager = UpdateManager(context)
+                                        updateManager.checkForUpdates(context as Activity, forceCheck = true)
+                                        analyticsManager.logEvent("manual_update_check")
+                                        
+                                        // Show success message
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, "Update check completed", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("SettingsScreen", "Error checking for updates", e)
+                                        withContext(Dispatchers.Main) {
+                                            Toast.makeText(context, "Failed to check for updates", Toast.LENGTH_SHORT).show()
+                                        }
+                                    } finally {
+                                        isCheckingUpdates = false
+                                    }
                                 }
                             }
-                        }
+                        },
+                        enabled = !isCheckingUpdates
                     ) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Check for Updates",
-                            tint = Color(0xFFD32F2F)
+                            tint = if (isCheckingUpdates) Color.Gray else Color(0xFFD32F2F),
+                            modifier = Modifier.graphicsLayer(
+                                rotationZ = updateCheckRotation
+                            )
                         )
+                    }
+                }
+                
+                // Animation for the refresh icon
+                LaunchedEffect(isCheckingUpdates) {
+                    if (isCheckingUpdates) {
+                        while (isCheckingUpdates) {
+                            updateCheckRotation += 360f
+                            delay(1000) // Complete rotation in 1 second
+                        }
                     }
                 }
             }
@@ -865,12 +892,8 @@ fun SettingsScreen(
         MicTestDialog(
             darkTheme = darkTheme,
             micVolume = settings.micVolume,
-            noiseSuppression = settings.noiseSuppression,
             onMicVolumeChange = { volume ->
                 scope.launch { settingsDataStore.setMicVolume(volume) }
-            },
-            onNoiseSuppressionChange = { enabled ->
-                scope.launch { settingsDataStore.setNoiseSuppression(enabled) }
             },
             onDismiss = { showMicTestDialog = false },
             micPermissionGranted = micPermissionGranted.value,
@@ -948,9 +971,7 @@ fun SettingsRow(
 fun MicTestDialog(
     darkTheme: Boolean,
     micVolume: Int,
-    noiseSuppression: Boolean,
     onMicVolumeChange: (Int) -> Unit,
-    onNoiseSuppressionChange: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     micPermissionGranted: Boolean,
     onRequestPermission: () -> Unit
@@ -1055,33 +1076,11 @@ fun MicTestDialog(
                     thumb = { CircularThumb() }
                 )
                 
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                // Noise Suppression Toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Noise Suppression",
-                        modifier = Modifier.weight(1f),
-                        color = if (darkTheme) Color.White else Color.Black
-                    )
-                    Switch(
-                        checked = noiseSuppression,
-                        onCheckedChange = onNoiseSuppressionChange,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color(0xFFD32F2F),
-                            checkedTrackColor = Color(0xFFD32F2F).copy(alpha = 0.5f)
-                        )
-                    )
-                }
-                
                 Spacer(modifier = Modifier.height(24.dp))
                 
                 // Instructions
                 Text(
-                    text = "Speak into your microphone to hear yourself in real-time. Adjust volume and noise suppression settings to find the best quality.",
+                    text = "Speak into your microphone to hear yourself in real-time. Adjust volume to find the best quality.",
                     color = Color.Gray,
                     style = MaterialTheme.typography.bodySmall
                 )
@@ -1168,14 +1167,6 @@ fun MicTestDialog(
                                         for (i in 0 until readSize) {
                                             buffer[i] = (buffer[i] * volumeMultiplier).toInt().toShort()
                                         }
-                                        if (noiseSuppression) {
-                                            val threshold = 1000
-                                            for (i in 0 until readSize) {
-                                                if (kotlin.math.abs(buffer[i].toInt()) < threshold) {
-                                                    buffer[i] = 0
-                                                }
-                                            }
-                                        }
                                         audioPlayer?.write(buffer, 0, readSize)
                                     }
                                 }
@@ -1217,10 +1208,20 @@ private fun isServiceRunning(context: Context): Boolean {
 
 @Composable
 fun CircularThumb() {
-    Canvas(modifier = Modifier.size(16.dp)) {
+    Canvas(modifier = Modifier.size(20.dp)) {
         drawCircle(
             color = Color.White,
             radius = size.minDimension / 2
+        )
+        drawCircle(
+            color = Color(0xFFD32F2F),
+            radius = size.minDimension / 2 - 2.dp.toPx(),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3.dp.toPx())
+        )
+        drawCircle(
+            color = Color.Black.copy(alpha = 0.15f),
+            radius = size.minDimension / 2,
+            center = center + androidx.compose.ui.geometry.Offset(2f, 2f)
         )
     }
 } 

@@ -31,8 +31,6 @@ class MicRecorder(
     private var recordingJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var currentVolume = micVolume
-    private var currentNoiseSuppression = enableNoiseSuppressor
-    private var noiseSuppressor: NoiseSuppressor? = null
     private var isMuted = false
 
     fun startRecording() {
@@ -73,64 +71,11 @@ class MicRecorder(
             return
         }
 
-        // Enable noise suppression if available (new logic)
-        val audioSessionId = audioRecord!!.audioSessionId
-        if (NoiseSuppressor.isAvailable()) {
-            val suppressor = NoiseSuppressor.create(audioSessionId)
-            suppressor?.enabled = true
-        }
-
-        // Noise suppressor (legacy logic, can be kept for settings-based control)
-        setupNoiseSuppressor()
-
         isRecording = true
         isPaused = false
         recordingJob = scope.launch {
             recordAudio(bufferSize)
         }
-    }
-
-    private fun setupNoiseSuppressor() {
-        if (currentNoiseSuppression && NoiseSuppressor.isAvailable()) {
-            try {
-                noiseSuppressor = NoiseSuppressor.create(audioRecord!!.audioSessionId)
-                if (noiseSuppressor == null) {
-                    Log.w(TAG, "NoiseSuppressor.create() returned null - noise suppression not available on this device")
-                } else {
-                noiseSuppressor?.enabled = true
-                Log.d(TAG, "Noise suppressor enabled")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to create noise suppressor", e)
-            }
-        }
-    }
-
-    fun pauseRecording() {
-        isPaused = true
-        Log.d(TAG, "Mic recording paused")
-    }
-
-    fun resumeRecording() {
-        isPaused = false
-        Log.d(TAG, "Mic recording resumed")
-    }
-
-    fun setVolume(volume: Int) {
-        currentVolume = volume / 100f
-        Log.d(TAG, "Mic volume set to: $volume%")
-    }
-
-    fun setNoiseSuppression(enabled: Boolean) {
-        currentNoiseSuppression = enabled
-        if (audioRecord != null) {
-            setupNoiseSuppressor()
-        }
-        Log.d(TAG, "Noise suppression ${if (enabled) "enabled" else "disabled"}")
-    }
-
-    fun setMuted(muted: Boolean) {
-        isMuted = muted
     }
 
     private suspend fun recordAudio(bufferSize: Int) {
